@@ -1,0 +1,21 @@
+import { defineConfig } from "vite";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+
+export default defineConfig({
+  plugins: [svelte()],
+  resolve: {
+    alias: {
+      $lib: "/src/lib"
+    }
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./vitest.setup.ts"],
+    include: ["src/**/*.test.ts"]
+  },
+  server: {
+    port: 1420,
+    strictPort: true
+  },
+  clearScreen: false
+});

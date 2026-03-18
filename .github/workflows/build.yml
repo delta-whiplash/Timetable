@@ -1,0 +1,191 @@
+name: Build Timetable Desktop
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check frontend
+        run: npm run check
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run backend tests
+        run: cd src-tauri && cargo test --no-default-features
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri application
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: npm run tauri build
+
+      - name: Rename MSI with version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if ($msi) {
+            $newName = "Timetable-Desktop_${version}_x64_${{ matrix.os }}.msi"
+            Copy-Item $msi.FullName -Destination $newName
+            echo "MSI_RENAMED=$newName" >> $env:GITHUB_ENV
+          }
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Timetable-Desktop-${{ matrix.os }}-MSI
+          path: ${{ env.MSI_RENAMED }}
+          if-no-files-found: error
+
+      - name: Upload NSIS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Timetable-Desktop-${{ matrix.os }}-NSIS
+          path: src-tauri/target/release/bundle/nsis/
+          if-no-files-found: ignore
+
+      - name: Upload updater artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Timetable-Desktop-${{ matrix.os }}-Updater
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.zip
+          if-no-files-found: ignore
+
+  test-e2e:
+    name: E2E Tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: [build]
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+        shell: bash
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.msi
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  check-linux:
+    name: Check on Linux (CI compatibility)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check frontend (Linux compatible)
+        run: env HOME=/tmp npm_config_cache=/tmp/.npm npm run check
+
+      - name: Run frontend tests (Linux compatible)
+        run: env HOME=/tmp TMP=/tmp TEMP=/tmp TMPDIR=/tmp npm_config_cache=/tmp/.npm npm test
+
+      - name: Run backend tests (Linux compatible)
+        run: |
+          cd src-tauri
+          env CARGO_HOME=/tmp/cargo cargo test --no-default-features

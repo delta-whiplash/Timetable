@@ -1,0 +1,235 @@
+use super::{
+    errors::ValidationError,
+    types::{
+        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, DayWorkSummary,
+        DefaultBreakMinutes, DefaultWorkInterval, ThemePreference,
+        WeekSheet, WeekSummary, WorkedMinutes, WorkInterval,
+    },
+};
+
+#[doc(alias = "duration formatter")]
+pub fn minutes_to_label(minutes: u16) -> String {
+    format!("{}h{:02}", minutes / 60, minutes % 60)
+}
+
+#[doc(alias = "human duration formatter")]
+pub fn minutes_to_human_label(minutes: u16) -> String {
+    if minutes < 60 {
+        format!("{} min", minutes)
+    } else {
+        format!("{}h {}min", minutes / 60, minutes % 60)
+    }
+}
+
+pub fn default_interval() -> WorkInterval {
+    WorkInterval {
+        start: super::types::TimeOfDay(8 * 60),
+        end: super::types::TimeOfDay(18 * 60),
+    }
+}
+
+pub fn default_break() -> BreakMinutes {
+    BreakMinutes(60)
+}
+
+pub fn default_work_interval() -> DefaultWorkInterval {
+    DefaultWorkInterval {
+        start: super::types::TimeOfDay(8 * 60),
+        end: super::types::TimeOfDay(18 * 60),
+    }
+}
+
+pub fn default_break_minutes() -> DefaultBreakMinutes {
+    DefaultBreakMinutes(60)
+}
+
+pub fn default_theme() -> ThemePreference {
+    ThemePreference::Dark
+}
+
+#[doc(alias = "new week")]
+pub fn default_entries(configured_days: &[ConfiguredDay]) -> Vec<DayEntry> {
+    configured_days
+        .iter()
+        .cloned()
+        .map(|day| DayEntry {
+            day_id: day.day_id,
+            label: day.label,
+            intervals: if day.enabled { vec![default_interval()] } else { Vec::new() },
+            break_minutes: default_break(),
+            enabled: day.enabled,
+        })
+        .collect()
+}
+
+pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
+    if entry.label.0.trim().is_empty() {
+        return Err(ValidationError::EmptyLabel {
+            day_id: entry.day_id.0,
+        });
+    }
+
+    if entry.intervals.len() > 1 {
+        return Err(ValidationError::TooManyIntervals {
+            day_id: entry.day_id.0,
+        });
+    }
+
+    if !entry.enabled {
+        return Ok(());
+    }
+
+    let interval = entry
+        .intervals
+        .first()
+        .ok_or(ValidationError::MissingTimeInput {
+            day_id: entry.day_id.0,
+        })?;
+
+    if interval.end.0 <= interval.start.0 {
+        return Err(ValidationError::InvalidTimeRange {
+            day_id: entry.day_id.0,
+        });
+    }
+
+    if entry.break_minutes.0 >= interval.end.0 - interval.start.0 {
+        return Err(ValidationError::BreakExceedsDay {
+            day_id: entry.day_id.0,
+        });
+    }
+
+    Ok(())
+}
+
+pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
+    validate_day(entry)?;
+    if !entry.enabled {
+        return Ok(0);
+    }
+
+    let Some(interval) = entry.intervals.first() else {
+        return Ok(0);
+    };
+
+    Ok(interval.end.0 - interval.start.0 - entry.break_minutes.0)
+}
+
+#[doc(alias = "week summary")]
+pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError> {
+    let mut total = 0_u16;
+    let mut worked_days = 0_u8;
+    let mut details = Vec::new();
+
+    for entry in &sheet.entries {
+        let minutes = calculate_day_minutes(entry)?;
+        if minutes > 0 {
+            total = total.saturating_add(minutes);
+            worked_days = worked_days.saturating_add(1);
+            details.push(DayWorkSummary {
+                day_id: entry.day_id,
+                label: entry.label.clone(),
+                worked_minutes: WorkedMinutes(minutes),
+            });
+        }
+    }
+
+    details.sort_by_key(|item| item.worked_minutes.0);
+
+    let overtime = total.saturating_sub(sheet.overtime_threshold.0);
+    let average = if worked_days == 0 {
+        0
+    } else {
+        total / u16::from(worked_days)
+    };
+
+    Ok(WeekSummary {
+        total_minutes: WorkedMinutes(total),
+        overtime_minutes: WorkedMinutes(overtime),
+        average_minutes: WorkedMinutes(average),
+        longest_day: details.last().cloned(),
+        shortest_day: details.first().cloned(),
+        worked_days,
+    })
+}
+
+pub fn quick_read(summary: &WeekSummary) -> String {
+    match (&summary.longest_day, &summary.shortest_day) {
+        (Some(longest), Some(shortest)) => format!(
+            "{} jour(s) saisi(s). Plus longue : {}. Plus courte : {}.",
+            summary.worked_days, longest.label.0, shortest.label.0
+        ),
+        _ => "Aucun horaire saisi pour le moment.".to_string(),
+    }
+}
+
+pub fn default_settings() -> super::types::AppSettings {
+    super::types::AppSettings {
+        overtime_threshold: super::types::OvertimeThresholdMinutes(35 * 60),
+        theme: default_theme(),
+        default_work_interval: default_work_interval(),
+        default_break_minutes: default_break_minutes(),
+        configured_days: default_configured_days(),
+        active_week_id: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::domain::types::{
+        AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay,
+        WeekId, WeekSheet, WeekStartDate, WorkInterval,
+    };
+
+    fn build_day(day_id: u8, start: u16, end: u16, break_minutes: u16) -> DayEntry {
+        DayEntry {
+            day_id: DayId(day_id),
+            label: DayLabel(format!("Jour {day_id}")),
+            intervals: vec![WorkInterval {
+                start: TimeOfDay(start),
+                end: TimeOfDay(end),
+            }],
+            break_minutes: BreakMinutes(break_minutes),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn computes_week_summary() {
+        let sheet = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::today(),
+            entries: vec![
+                build_day(0, 480, 1080, 60),
+                build_day(1, 480, 1020, 30),
+            ],
+            overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        };
+
+        let summary = summarize_week(&sheet).expect("summary should be valid");
+
+        assert_eq!(summary.total_minutes.0, 1050);
+        assert_eq!(summary.overtime_minutes.0, 0);
+        assert_eq!(summary.average_minutes.0, 525);
+        assert_eq!(quick_read(&summary), "2 jour(s) saisi(s). Plus longue : Jour 0. Plus courte : Jour 1.");
+    }
+
+    proptest! {
+        #[test]
+        fn total_minutes_never_negative(start in 0u16..1200, duration in 1u16..360, break_minutes in 0u16..120) {
+            let end = start.saturating_add(duration).min(1439);
+            let entry = build_day(0, start, end.max(start + 1), break_minutes.min(duration.saturating_sub(1)));
+            let total = calculate_day_minutes(&entry).expect("valid day");
+            prop_assert!(total <= 1439);
+        }
+    }
+
+    #[test]
+    fn defaults_provide_working_configuration() {
+        let settings: AppSettings = default_settings();
+        assert_eq!(settings.overtime_threshold.0, 2100);
+        assert_eq!(settings.configured_days.len(), 7);
+    }
+}

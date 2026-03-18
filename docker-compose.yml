@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # Test frontend et backend sur Linux (compatibilité CI)
+  test-linux:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-tester
+    volumes:
+      - ./src:/app/src
+      - ./src-tauri:/app/src-tauri
+      - ./tests:/app/tests
+    command: bash -c "npm run check && npm test && cd src-tauri && cargo test --no-default-features"
+
+  # Build frontend seulement
+  build-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-builder
+    volumes:
+      - ./src:/app/src
+      - ./dist:/app/dist
+    command: npm run build
+
+# Note: Le build MSI complet nécessite Windows.
+# Utilisez GitHub Actions (.github/workflows/build.yml) ou build sur Windows.

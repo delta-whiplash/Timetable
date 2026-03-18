@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.svelte-kit/
+coverage/
+playwright-report/
+test-results/
+src-tauri/target/
+src-tauri/gen/
+*.db
+*.db.wal
+*.db.tmp
+*.log
+.DS_Store
