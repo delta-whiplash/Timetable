@@ -22,7 +22,7 @@ pub fn init_tracing() {
             let log_dir = std::path::PathBuf::from(app_dir).join("logs");
             let _ = std::fs::create_dir_all(&log_dir);
 
-            let file_appender = tracing_appender::rolling::daily(&log_dir, "timetable", "log");
+            let file_appender = tracing_appender::rolling::daily(&log_dir, "timetable.log");
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
             let subscriber = fmt()
@@ -34,7 +34,7 @@ pub fn init_tracing() {
             let _ = tracing::subscriber::set_global_default(subscriber);
 
             // Prevent console window from appearing by redirect stdout/stderr to nowhere
-            let _ = io::sink();
+            let _ = std::io::sink();
         } else {
             // Fallback if TAURI_APP_DIR is not set (shouldn't happen in production)
             let subscriber = fmt()
