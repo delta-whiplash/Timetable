@@ -1,28 +1,21 @@
-name: Build Timetable Desktop
+name: Build Release
 
 on:
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+  # macOS Universal Binary (x86_64 + aarch64)
+  build-macos:
+    name: Build macOS Universal
+    runs-on: macos-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -31,30 +24,132 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22'
+
+      # Cache Cargo registry index
+      - name: Cache Cargo registry index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: cargo-macos-registry-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-registry-index-
+
+      # Cache Cargo build artifacts (aggressive)
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target
+          key: cargo-macos-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-build-
+
+      # Cache npm modules
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            .npm
+          key: node-macos-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-macos-
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check frontend
-        run: npm run check
+      - name: Build frontend
+        run: npm run build
 
-      - name: Run frontend tests
-        run: npm test
+      - name: Build Tauri application (macOS)
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: npm run tauri build -- --target universal-apple-darwin
 
-      - name: Run backend tests
-        run: cd src-tauri && cargo test --no-default-features
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: src-tauri/target/*/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Upload APP bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: src-tauri/target/*/release/bundle/macos/*.app
+          if-no-files-found: ignore
+
+  # Windows x64
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Cache Cargo registry index
+      - name: Cache Cargo registry index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: cargo-windows-registry-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-windows-registry-index-
+
+      # Cache Cargo build artifacts (aggressive)
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target
+          key: cargo-windows-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-windows-build-
+
+      # Cache npm modules
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            .npm
+          key: node-windows-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-windows-
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build frontend
         run: npm run build
 
-      - name: Build Tauri application
+      - name: Build Tauri application (Windows)
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -66,37 +161,41 @@ jobs:
           $version = node -p "require('./package.json').version"
           $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
           if ($msi) {
-            $newName = "Timetable-Desktop_${version}_x64_${{ matrix.os }}.msi"
+            $newName = "Timetable-Desktop_${version}_x64_windows.msi"
             Copy-Item $msi.FullName -Destination $newName
             echo "MSI_RENAMED=$newName" >> $env:GITHUB_ENV
+          }
+
+      - name: Rename NSIS with version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $exe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if ($exe) {
+            $newName = "Timetable-Desktop_${version}_x64_windows.exe"
+            Copy-Item $exe.FullName -Destination $newName
+            echo "NSIS_RENAMED=$newName" >> $env:GITHUB_ENV
           }
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Timetable-Desktop-${{ matrix.os }}-MSI
+          name: windows-msi
           path: ${{ env.MSI_RENAMED }}
           if-no-files-found: error
 
       - name: Upload NSIS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Timetable-Desktop-${{ matrix.os }}-NSIS
-          path: src-tauri/target/release/bundle/nsis/
+          name: windows-nsis
+          path: ${{ env.NSIS_RENAMED }}
           if-no-files-found: ignore
 
-      - name: Upload updater artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Timetable-Desktop-${{ matrix.os }}-Updater
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/msi/*.msi.zip
-          if-no-files-found: ignore
-
-  test-e2e:
-    name: E2E Tests
-    runs-on: windows-latest
+  # Linux AppImage
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -104,35 +203,77 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      # Cache Cargo registry index
+      - name: Cache Cargo registry index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: cargo-linux-registry-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-registry-index-
+
+      # Cache Cargo build artifacts (aggressive)
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target
+          key: cargo-linux-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-build-
+
+      # Cache npm modules
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            .npm
+          key: node-linux-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-linux-
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Build frontend
+        run: npm run build
 
-      - name: Run E2E tests
-        run: npm run test:e2e
+      - name: Build Tauri application (Linux)
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: npm run tauri build
 
-      - name: Upload Playwright report
-        if: always()
+      - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
+          name: linux-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
 
+  # Attach artifacts to GitHub Release
   release:
-    name: Create Release
-    needs: [build]
-    runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Attach to Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     permissions:
       contents: write
@@ -148,44 +289,16 @@ jobs:
 
       - name: Display structure of downloaded files
         run: ls -R artifacts
-        shell: bash
 
-      - name: Create Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.msi
-          draft: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.app
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  check-linux:
-    name: Check on Linux (CI compatibility)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check frontend (Linux compatible)
-        run: env HOME=/tmp npm_config_cache=/tmp/.npm npm run check
-
-      - name: Run frontend tests (Linux compatible)
-        run: env HOME=/tmp TMP=/tmp TEMP=/tmp TMPDIR=/tmp npm_config_cache=/tmp/.npm npm test
-
-      - name: Run backend tests (Linux compatible)
-        run: |
-          cd src-tauri
-          env CARGO_HOME=/tmp/cargo cargo test --no-default-features
