@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use chrono::Utc;
 use serde_json::json;
@@ -15,7 +15,7 @@ use crate::{
         ports::{AnalyticsRepository, DiagnosticsStore, SettingsRepository, WeekRepository},
     },
     domain::{
-        errors::{ApplicationError, ConfigError, ValidationError},
+        errors::{ApplicationError, ConfigError, StorageError, ValidationError},
         logic::{default_entries, minutes_to_label, summarize_week},
         types::{
             AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
@@ -32,6 +32,7 @@ pub struct ApplicationService {
     diagnostics_store: Arc<dyn DiagnosticsStore>,
     analytics_repository: Arc<dyn AnalyticsRepository>,
     runtime_config: AppRuntimeConfig,
+    cached_settings: Arc<RwLock<Option<AppSettings>>>,
 }
 
 impl ApplicationService {
@@ -48,7 +49,42 @@ impl ApplicationService {
             diagnostics_store,
             analytics_repository,
             runtime_config,
+            cached_settings: Arc::new(RwLock::new(None)),
         }
+    }
+
+    fn get_settings(&self) -> Result<AppSettings, ApplicationError> {
+        {
+            let cached = self.cached_settings.read()
+                .map_err(|_| ApplicationError::Storage(StorageError::StorageUnavailable))?;
+            if let Some(settings) = cached.as_ref() {
+                return Ok(settings.clone());
+            }
+        }
+
+        let settings = self.settings_repository.load_settings()?;
+        {
+            let mut cache = self.cached_settings.write()
+                .map_err(|_| ApplicationError::Storage(StorageError::StorageUnavailable))?;
+            *cache = Some(settings.clone());
+        }
+        Ok(settings)
+    }
+
+    fn invalidate_settings_cache(&self) {
+        if let Ok(mut cache) = self.cached_settings.write() {
+            *cache = None;
+        }
+    }
+
+    fn save_settings_and_cache(&self, settings: &AppSettings) -> Result<(), ApplicationError> {
+        self.settings_repository.save_settings(settings)?;
+        {
+            let mut cache = self.cached_settings.write()
+                .map_err(|_| ApplicationError::Storage(StorageError::StorageUnavailable))?;
+            *cache = Some(settings.clone());
+        }
+        Ok(())
     }
 
     pub fn capture_error(&self, context: &str, error: &ApplicationError) {
@@ -76,7 +112,7 @@ impl ApplicationService {
     }
 
     pub fn load_bootstrap(&self) -> Result<BootstrapState, ApplicationError> {
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         let active_week = self.resolve_active_week(&settings)?;
         Ok(BootstrapState {
             theme: settings_to_view(&settings).theme,
@@ -88,7 +124,7 @@ impl ApplicationService {
     }
 
     pub fn get_active_week(&self) -> Result<WeekSheetView, ApplicationError> {
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         self.resolve_active_week(&settings)
     }
 
@@ -97,9 +133,9 @@ impl ApplicationService {
         summarize_week(&week)?;
         self.week_repository.save_week(&week)?;
 
-        let mut settings = self.settings_repository.load_settings()?;
+        let mut settings = self.get_settings()?;
         settings.active_week_id = Some(week.week_id.clone());
-        self.settings_repository.save_settings(&settings)?;
+        self.save_settings_and_cache(&settings)?;
         info!(week_id = %week.week_id.0, "week saved");
         week_to_view(&week).map_err(ApplicationError::from)
     }
@@ -108,7 +144,7 @@ impl ApplicationService {
         &self,
         input: WeekSelectorInput,
     ) -> Result<WeekSheetView, ApplicationError> {
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         let week_start = WeekStartDate::parse(&input.week_start)?;
         let week = self.ensure_week_for_date(week_start, &settings)?;
         week_to_view(&week).map_err(ApplicationError::from)
@@ -135,21 +171,21 @@ impl ApplicationService {
     pub fn delete_week(&self, input: DeleteWeekInput) -> Result<(), ApplicationError> {
         let week_id = WeekId(input.week_id);
         self.week_repository.delete_week(&week_id)?;
-        let mut settings = self.settings_repository.load_settings()?;
+        let mut settings = self.get_settings()?;
         if settings.active_week_id.as_ref() == Some(&week_id) {
             settings.active_week_id = None;
-            self.settings_repository.save_settings(&settings)?;
+            self.save_settings_and_cache(&settings)?;
         }
         Ok(())
     }
 
     pub fn load_settings(&self) -> Result<SettingsView, ApplicationError> {
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         Ok(settings_to_view(&settings))
     }
 
     pub fn save_settings(&self, input: SaveSettingsInput) -> Result<SettingsView, ApplicationError> {
-        let mut settings = self.settings_repository.load_settings()?;
+        let mut settings = self.get_settings()?;
         settings.overtime_threshold = OvertimeThresholdMinutes::new(input.overtime_threshold_minutes)?;
         settings.configured_days = parse_configured_days(input.configured_days)?;
 
@@ -160,7 +196,7 @@ impl ApplicationService {
         };
         settings.default_break_minutes = DefaultBreakMinutes(BreakMinutes::parse(&input.default_break)?.0);
 
-        self.settings_repository.save_settings(&settings)?;
+        self.save_settings_and_cache(&settings)?;
 
         if let Some(active_week_id) = settings.active_week_id.clone() {
             if let Some(mut week) = self.week_repository.get_week_by_id(&active_week_id)? {
@@ -173,19 +209,19 @@ impl ApplicationService {
     }
 
     pub fn set_theme(&self, input: ThemeInput) -> Result<ThemeView, ApplicationError> {
-        let mut settings = self.settings_repository.load_settings()?;
+        let mut settings = self.get_settings()?;
         settings.theme = match input.theme.as_str() {
             "light" => ThemePreference::Light,
             "dark" => ThemePreference::Dark,
             _ => return Err(ApplicationError::Config(ConfigError::Invalid)),
         };
-        self.settings_repository.save_settings(&settings)?;
+        self.save_settings_and_cache(&settings)?;
         Ok(ThemeView { theme: input.theme })
     }
 
     pub fn get_app_status(&self) -> Result<AppStatusView, ApplicationError> {
         let metadata = self.week_repository.metadata()?;
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         let storage_status = match self.week_repository.ping() {
             Ok(()) => "healthy",
             Err(error) => {
@@ -224,7 +260,7 @@ impl ApplicationService {
 
     /// Export toutes les données de l'utilisateur (paramètres + semaines)
     pub fn export_data(&self) -> Result<String, ApplicationError> {
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
         let settings_view = settings_to_view(&settings);
 
         let weeks = self.week_repository.list_weeks()?;
@@ -256,7 +292,7 @@ impl ApplicationService {
         })?;
 
         // Importer les paramètres
-        let settings = self.settings_repository.load_settings()?;
+        let settings = self.get_settings()?;
 
         // Mettre à jour les paramètres depuis l'import
         let mut updated_settings = settings.clone();
@@ -287,7 +323,7 @@ impl ApplicationService {
         };
         updated_settings.default_break_minutes = DefaultBreakMinutes(BreakMinutes::parse(&import.settings.default_break)?.0);
 
-        self.settings_repository.save_settings(&updated_settings)?;
+        self.save_settings_and_cache(&updated_settings)?;
 
         // Importer les semaines
         for week_view in import.weeks {
@@ -343,7 +379,7 @@ impl ApplicationService {
         if let Some(week) = self.week_repository.get_week_by_start(&week_start)? {
             let mut next_settings = settings.clone();
             next_settings.active_week_id = Some(week.week_id.clone());
-            self.settings_repository.save_settings(&next_settings)?;
+            self.save_settings_and_cache(&next_settings)?;
             return Ok(week);
         }
 
@@ -357,7 +393,7 @@ impl ApplicationService {
 
         let mut next_settings = settings.clone();
         next_settings.active_week_id = Some(week.week_id.clone());
-        self.settings_repository.save_settings(&next_settings)?;
+        self.save_settings_and_cache(&next_settings)?;
         Ok(week)
     }
 

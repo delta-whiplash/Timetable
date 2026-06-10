@@ -11,6 +11,7 @@ export interface AppState {
   bootstrapped: boolean;
   loading: boolean;
   savingWeek: boolean;
+  switchingWeek: boolean;
   savingSettings: boolean;
   error: CommandError | null;
   version: string;
@@ -27,6 +28,7 @@ export function initialAppState(): AppState {
     bootstrapped: false,
     loading: true,
     savingWeek: false,
+    switchingWeek: false,
     savingSettings: false,
     error: null,
     version: "",

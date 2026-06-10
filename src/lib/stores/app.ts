@@ -25,9 +25,44 @@ import { initialAppState, toCommandError, type AppState } from "./state";
 function createAppStore() {
   const { subscribe, update } = writable<AppState>(initialAppState());
 
+  // Déduplication pour éviter refreshes concurrents
+  let refreshInProgress = false;
+  let pendingRefresh = false;
+
   async function refreshSecondaryData() {
-    const [settings, history, status] = await Promise.all([loadSettings(), listWeeks(), getAppStatus()]);
-    update((state) => ({ ...state, settings, history, status }));
+    if (refreshInProgress) {
+      pendingRefresh = true;
+      return;
+    }
+    refreshInProgress = true;
+    pendingRefresh = false;
+    try {
+      const [settings, history, status] = await Promise.all([loadSettings(), listWeeks(), getAppStatus()]);
+      update((state) => ({ ...state, settings, history, status }));
+      if (pendingRefresh) {
+        await refreshSecondaryData();
+      }
+    } finally {
+      refreshInProgress = false;
+    }
+  }
+
+  async function refreshHistoryOnly() {
+    if (refreshInProgress) {
+      pendingRefresh = true;
+      return;
+    }
+    refreshInProgress = true;
+    pendingRefresh = false;
+    try {
+      const history = await listWeeks();
+      update((state) => ({ ...state, history }));
+    } finally {
+      refreshInProgress = false;
+      if (pendingRefresh) {
+        await refreshSecondaryData();
+      }
+    }
   }
 
   async function bootstrap() {
@@ -50,7 +85,7 @@ function createAppStore() {
   }
 
   async function persistWeek(input: SaveWeekInput) {
-    // Pas de savingWeek: le save est en arrière-plan, le seul feedback est l'indicateur dans App.svelte
+    update((state) => ({ ...state, savingWeek: true, error: null }));
     try {
       await saveWeek(input);
       // Recharger l'activeWeek pour obtenir les totaux recalculés par le backend
@@ -58,21 +93,22 @@ function createAppStore() {
       update((state) => ({
         ...state,
         activeWeek: bootstrapState.activeWeek,
+        savingWeek: false,
       }));
-      await refreshSecondaryData();
+      await refreshHistoryOnly();
     } catch (error) {
-      update((state) => ({ ...state, error: toCommandError(error) }));
+      update((state) => ({ ...state, savingWeek: false, error: toCommandError(error) }));
     }
   }
 
   async function switchWeek(weekStart: string) {
-    update((state) => ({ ...state, loading: true, error: null }));
+    update((state) => ({ ...state, switchingWeek: true, error: null }));
     try {
       const activeWeek = await createOrSwitchWeek({ weekStart });
-      update((state) => ({ ...state, activeWeek, loading: false }));
-      await refreshSecondaryData();
+      update((state) => ({ ...state, activeWeek, switchingWeek: false }));
+      await refreshHistoryOnly();
     } catch (error) {
-      update((state) => ({ ...state, loading: false, error: toCommandError(error) }));
+      update((state) => ({ ...state, switchingWeek: false, error: toCommandError(error) }));
     }
   }
 

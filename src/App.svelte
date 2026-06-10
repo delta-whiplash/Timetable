@@ -85,25 +85,43 @@
   }
 
   // Force le save immédiat des modifications en attente
-  function flushPendingChanges() {
+  async function flushPendingChanges(): Promise<void> {
     if (hasPendingChanges && state.activeWeek) {
-      saveDraft(state.activeWeek.entries, true);
+      hasPendingChanges = false; // Reset avant save pour éviter race
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+      }
+      const input = {
+        weekId: state.activeWeek.weekId,
+        weekStart: state.activeWeek.weekStart,
+        overtimeThresholdMinutes: state.activeWeek.overtimeThresholdMinutes,
+        entries: state.activeWeek.entries.map((entry) => ({
+          dayId: entry.dayId,
+          label: entry.label,
+          enabled: entry.enabled,
+          start: entry.start,
+          end: entry.end,
+          breakTime: entry.breakTime
+        }))
+      };
+      await appStore.persistWeek(input);
     }
   }
 
-  function handleWeekChange(weekStart: string) {
-    flushPendingChanges(); // Save immédiat avant changement
-    void appStore.switchWeek(weekStart);
+  async function handleWeekChange(weekStart: string) {
+    await flushPendingChanges(); // Save immédiat avant changement
+    await appStore.switchWeek(weekStart);
   }
 
-  function handleOpenFromHistory(weekStart: string) {
-    flushPendingChanges(); // Save immédiat avant changement
-    void appStore.switchWeek(weekStart);
+  async function handleOpenFromHistory(weekStart: string) {
+    await flushPendingChanges(); // Save immédiat avant changement
+    await appStore.switchWeek(weekStart);
     activeTab = "timesheet"; // Basculer vers l'onglet timesheet
   }
 
-  function setTab(tab: typeof activeTab) {
-    flushPendingChanges(); // Save immédiat avant changement d'onglet
+  async function setTab(tab: typeof activeTab) {
+    await flushPendingChanges(); // Save immédiat avant changement d'onglet
     activeTab = tab;
   }
 </script>
@@ -144,7 +162,7 @@
             </div>
             <WeekSelector
               weekStart={state.activeWeek.weekStart}
-              disabled={state.savingWeek}
+              disabled={state.savingWeek || state.switchingWeek}
               on:change={(e) => handleWeekChange(e.detail)}
             />
           </header>

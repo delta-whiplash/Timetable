@@ -239,18 +239,81 @@ impl WeekRepository for DuckDbWeekRepository {
 
     fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
+
+        // Single JOIN query instead of N+1
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id FROM weeks ORDER BY week_start DESC",
+            "SELECT
+                w.id, w.week_start, w.overtime_threshold_minutes,
+                de.day_id, de.label, de.enabled, de.start_minutes, de.end_minutes, de.break_minutes
+             FROM weeks w
+             LEFT JOIN day_entries de ON w.id = de.week_id
+             ORDER BY w.week_start DESC, de.day_id ASC"
         ))?;
+
         let mut rows = map_storage_error(statement.query([]))?;
-        let mut items = Vec::new();
+
+        // Group entries by week_id
+        use std::collections::HashMap;
+        let mut weeks_map: HashMap<String, (WeekId, WeekStartDate, OvertimeThresholdMinutes, Vec<DayEntry>)> = HashMap::new();
+
         while let Some(row) = map_storage_error(rows.next())? {
-            let week_id: String = map_storage_error(row.get(0))?;
-            if let Some(week) = self.load_week(&connection, &WeekId(week_id))? {
-                items.push(week);
+            let week_id_str: String = map_storage_error(row.get(0))?;
+            let week_start_str: String = map_storage_error(row.get(1))?;
+            let overtime_threshold: u16 = map_storage_error(row.get(2))?;
+
+            // Get or create week entry in map
+            if !weeks_map.contains_key(&week_id_str) {
+                let week_start = WeekStartDate::parse(&week_start_str)
+                    .map_err(|_| StorageError::SerializationFailed)?;
+                weeks_map.insert(
+                    week_id_str.clone(),
+                    (WeekId(week_id_str.clone()), week_start, OvertimeThresholdMinutes(overtime_threshold), Vec::new())
+                );
+            }
+
+            // Add entry if present (LEFT JOIN can have NULL for day columns)
+            let day_id: Option<u8> = row.get(3).ok();
+            if let Some(day_id) = day_id {
+                let label: String = map_storage_error(row.get(4))?;
+                let enabled: bool = map_storage_error(row.get(5))?;
+                let start_minutes: Option<u16> = map_storage_error(row.get(6))?;
+                let end_minutes: Option<u16> = map_storage_error(row.get(7))?;
+                let break_minutes: u16 = map_storage_error(row.get(8))?;
+
+                let intervals = match (start_minutes, end_minutes) {
+                    (Some(start), Some(end)) => vec![WorkInterval {
+                        start: TimeOfDay(start),
+                        end: TimeOfDay(end),
+                    }],
+                    _ => Vec::new(),
+                };
+
+                let entry = DayEntry {
+                    day_id: DayId(day_id),
+                    label: DayLabel(label),
+                    intervals,
+                    break_minutes: BreakMinutes(break_minutes),
+                    enabled,
+                };
+
+                weeks_map.get_mut(&week_id_str).unwrap().3.push(entry);
             }
         }
-        Ok(items)
+
+        // Convert map to Vec<WeekSheet>, sorted by week_start DESC
+        let mut weeks: Vec<WeekSheet> = weeks_map.into_values()
+            .map(|(week_id, week_start, overtime_threshold, entries)| WeekSheet {
+                week_id,
+                week_start,
+                entries,
+                overtime_threshold,
+            })
+            .collect();
+
+        // Sort by week_start descending (since HashMap doesn preserve order)
+        weeks.sort_by(|a, b| b.week_start.as_string().cmp(&a.week_start.as_string()));
+
+        Ok(weeks)
     }
 
     fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError> {

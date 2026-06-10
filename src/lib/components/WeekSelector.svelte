@@ -6,6 +6,19 @@
 
   const dispatch = createEventDispatcher();
 
+  // Throttle pour éviter clics rapides
+  let lastClickTime = 0;
+  const CLICK_THROTTLE_MS = 100;
+
+  function isThrottled(): boolean {
+    const now = Date.now();
+    if (now - lastClickTime < CLICK_THROTTLE_MS) {
+      return true;
+    }
+    lastClickTime = now;
+    return false;
+  }
+
   function getMondayOfWeek(dateStr: string): Date {
     const date = new Date(dateStr);
     const day = date.getDay();
@@ -16,7 +29,11 @@
   }
 
   function formatDate(date: Date): string {
-    return date.toISOString().slice(0, 10);
+    // Use local date format to avoid timezone issues with toISOString()
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   function getCurrentWeekMonday(): string {
@@ -40,25 +57,22 @@
   }
 
   function previousWeek() {
-    if (disabled) return;
+    if (disabled || isThrottled()) return;
     const monday = getMondayOfWeek(weekStart);
     monday.setDate(monday.getDate() - 7);
-    weekStart = formatDate(monday);
-    dispatchChange();
+    dispatch("change", formatDate(monday));
   }
 
   function nextWeek() {
-    if (disabled) return;
+    if (disabled || isThrottled()) return;
     const monday = getMondayOfWeek(weekStart);
     monday.setDate(monday.getDate() + 7);
-    weekStart = formatDate(monday);
-    dispatchChange();
+    dispatch("change", formatDate(monday));
   }
 
   function goToCurrentWeek() {
-    if (disabled) return;
-    weekStart = getCurrentWeekMonday();
-    dispatchChange();
+    if (disabled || isThrottled()) return;
+    dispatch("change", getCurrentWeekMonday());
   }
 
   function dispatchChange() {
