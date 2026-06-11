@@ -96,6 +96,21 @@ Validation errors: `invalid_time_range`, `break_exceeds_day`, `missing_time_inpu
 
 Application is in French. User-facing strings, day labels (Lundi, Mardi...), error messages in French.
 
+## Recent Changes (v0.9.0)
+
+### Navigation Fixes
+- **savingWeek flag**: Now properly set during persistWeek to disable UI during save
+- **switchingWeek flag**: New flag in AppState to disable navigation during week switching
+- **flushPendingChanges**: Now async + awaited to prevent data loss on rapid navigation
+- **Throttle**: 100ms throttle on week selector buttons to prevent race conditions
+- **formatDate**: Uses local date format (no timezone shift from `toISOString()`)
+
+### Performance Optimizations
+- **Settings cache**: `Arc<RwLock<Option<AppSettings>>>` in ApplicationService reduces 8+ DB reads to 1
+- **N+1 query fix**: `list_weeks` now uses single JOIN query instead of N+1 pattern
+- **Selective refresh**: `refreshHistoryOnly()` for week operations (avoids 3 backend calls)
+- **Vite config**: Excludes `src-tauri/target/**` from watch to fix EBUSY on Windows
+
 ## Reference
 
 See `DEVELOPMENT.md` for detailed contribution steps and architecture diagrams.

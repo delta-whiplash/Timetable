@@ -12,15 +12,16 @@ Application Windows légère pour le suivi et le calcul des heures de travail he
 - **Seuil configurable** : Définissez votre seuil d'heures supplémentaires (par défaut : 35h)
 - **Historique** : Consultez et gérez vos semaines précédentes
 - **Thèmes** : Interface en mode clair ou sombre
-- **Export/Import** : Sauvegardez ou transférez vos données facilement
+- **Export/Import** : Sauvegardez ou transférez vos données facilement (JSON)
+- **Analytiques** : Statistiques par jour de la semaine, tendances hebdomadaires et mensuelles
 
-## Captures d'écran
+## Interface
 
-L'interface propose :
-- Une vue hebdomadaire avec 7 jours configurable
-- Un résumé instantané (total, heures sup., moyenne)
-- Un panneau de paramètres pour personnaliser l'application
-- Un historique de toutes vos semaines enregistrées
+L'application propose une interface à onglets :
+- **Feuille de temps** : Vue hebdomadaire avec 7 jours configurables et résumé instantané
+- **Historique** : Liste de toutes vos semaines enregistrées avec accès rapide
+- **Analytiques** : Graphiques et statistiques sur vos habitudes de travail
+- **Paramètres** : Configuration du seuil, libellés des jours, thème, valeurs par défaut
 
 ## Installation
 
@@ -29,9 +30,9 @@ L'interface propose :
 - **Windows 10** (version 21H2 ou supérieure) ou **Windows 11**
 - **WebView2** (inclus sur Windows 11, installable sur Windows 10)
 
-### Installation via MSI
+### Installation via l'installeur
 
-1. Téléchargez le fichier `Timetable-Desktop_0.9.0_x64_en-US.msi`
+1. Téléchargez le fichier `Timetable Desktop_0.9.0_x64-setup.exe`
 2. Double-cliquez sur le fichier pour lancer l'installation
 3. Suivez les instructions de l'assistant
 4. Lancez l'application depuis le menu Démarrer
@@ -39,7 +40,7 @@ L'interface propose :
 ### Mise à jour
 
 Pour mettre à jour vers une nouvelle version :
-1. Téléchargez la nouvelle version du MSI
+1. Téléchargez la nouvelle version de l'installeur
 2. Installez-la par-dessus l'existante (vos données seront conservées)
 
 ## Utilisation
@@ -55,14 +56,16 @@ Pour mettre à jour vers une nouvelle version :
 
 ### Navigation
 
-- Utilisez le sélecteur de date en haut à droite pour changer de semaine
-- Le panneau "Historique" à droite permet d'accéder rapidement aux semaines précédentes
+- Utilisez le sélecteur de semaine en haut à droite pour changer de semaine
+- L'onglet "Historique" dans la barre latérale permet d'accéder rapidement aux semaines précédentes
+- Cliquez sur le bouton "Aujourd'hui" pour revenir à la semaine en cours
 
 ### Paramètres
 
-Dans le panneau "Paramètres" :
-- Ajustez le **seuil d'heures supplémentaires** en minutes
-- Personnalisez les **libellés des jours**
+Dans l'onglet "Paramètres" :
+- Ajustez le **seuil d'heures supplémentaires**
+- Personnalisez les **libellés des jours** et leur activation par défaut
+- Définissez les **valeurs par défaut** pour les horaires (début, fin, pause)
 - Choisissez le **thème** (Clair/Sombre)
 
 Cliquez sur "Enregistrer" pour valider les modifications.
