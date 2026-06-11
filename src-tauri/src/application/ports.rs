@@ -23,6 +23,7 @@ pub trait WeekRepository: Send + Sync {
     fn save_week(&self, week: &WeekSheet) -> Result<(), StorageError>;
     fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError>;
     fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError>;
+    fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError>;
     fn metadata(&self) -> Result<AppMetadata, StorageError>;
     fn ping(&self) -> Result<(), StorageError>;
 }

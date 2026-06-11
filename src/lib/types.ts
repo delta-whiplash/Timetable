@@ -30,6 +30,8 @@ export interface WeekSummaryView {
   shortestDay: DaySummaryView | null;
   quickRead: string;
   percentage: number;
+  cumulativeBalanceMinutes: number;
+  cumulativeBalanceLabel: string;
 }
 
 export interface WeekSheetView {

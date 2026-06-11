@@ -152,6 +152,18 @@ pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError>
     })
 }
 
+pub fn signed_minutes_to_label(minutes: i32) -> String {
+    let abs = minutes.unsigned_abs();
+    let label = format!("{}h{:02}", abs / 60, abs % 60);
+    if minutes > 0 {
+        format!("+{label}")
+    } else if minutes < 0 {
+        format!("-{label}")
+    } else {
+        label
+    }
+}
+
 pub fn quick_read(summary: &WeekSummary) -> String {
     match (&summary.longest_day, &summary.shortest_day) {
         (Some(longest), Some(shortest)) => format!(
@@ -214,6 +226,27 @@ mod tests {
         assert_eq!(summary.overtime_minutes.0, 0);
         assert_eq!(summary.average_minutes.0, 525);
         assert_eq!(quick_read(&summary), "2 jour(s) saisi(s). Plus longue : Jour 0. Plus courte : Jour 1.");
+    }
+
+    #[test]
+    fn signed_minutes_to_label_zero() {
+        assert_eq!(signed_minutes_to_label(0), "0h00");
+    }
+
+    #[test]
+    fn signed_minutes_to_label_positive() {
+        assert_eq!(signed_minutes_to_label(150), "+2h30");
+        assert_eq!(signed_minutes_to_label(60), "+1h00");
+        assert_eq!(signed_minutes_to_label(59), "+0h59");
+        assert_eq!(signed_minutes_to_label(1), "+0h01");
+    }
+
+    #[test]
+    fn signed_minutes_to_label_negative() {
+        assert_eq!(signed_minutes_to_label(-150), "-2h30");
+        assert_eq!(signed_minutes_to_label(-60), "-1h00");
+        assert_eq!(signed_minutes_to_label(-59), "-0h59");
+        assert_eq!(signed_minutes_to_label(-1), "-0h01");
     }
 
     proptest! {

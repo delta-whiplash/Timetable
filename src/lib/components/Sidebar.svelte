@@ -26,6 +26,17 @@
     { id: "analytics" as const, label: "Analytiques", icon: "📊" },
     { id: "settings" as const, label: "Configuration", icon: "⚙️" },
   ];
+
+  function getBalanceBarStyle(balance: number, threshold: number): { width: string; left?: string; right?: string; background: string } {
+    if (threshold <= 0) return { width: "0%", background: "transparent" };
+    const percent = Math.min((Math.abs(balance) / threshold) * 50, 50);
+    if (balance > 0) {
+      return { width: `${percent}%`, left: "50%", background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" };
+    } else if (balance < 0) {
+      return { width: `${percent}%`, right: "50%", background: "linear-gradient(90deg, #ef4444 0%, #f97316 100%)" };
+    }
+    return { width: "0%", background: "transparent" };
+  }
 </script>
 
 <aside class="sidebar">
@@ -55,6 +66,31 @@
         {#if state.activeWeek.summary.percentage > 100}
           <span class="kpi-overtime">+{state.activeWeek.summary.percentage - 100}%</span>
         {/if}
+      </div>
+    </div>
+
+    <!-- Solde cumule (balance heures sup/sous-heures) -->
+    <div class="sidebar-card sidebar-card--balance">
+      <span class="sidebar-card-label">Solde heures</span>
+      <span class="sidebar-card-value balance-value {state.activeWeek.summary.cumulativeBalanceMinutes > 0 ? 'balance-positive' : state.activeWeek.summary.cumulativeBalanceMinutes < 0 ? 'balance-negative' : ''}">
+        {state.activeWeek.summary.cumulativeBalanceLabel}
+      </span>
+
+      <!-- Barre centree avec fill directionnel -->
+      <div class="balance-bar">
+        <div class="balance-bar-center"></div>
+        {#if state.activeWeek.summary.cumulativeBalanceMinutes !== 0}
+          <div
+            class="balance-bar-fill"
+            style="width: {Math.min((Math.abs(state.activeWeek.summary.cumulativeBalanceMinutes) / (state.settings?.overtimeThresholdMinutes || 2100)) * 50, 50)}%; {state.activeWeek.summary.cumulativeBalanceMinutes > 0 ? 'left: 50%;' : 'right: 50%;'} background: {state.activeWeek.summary.cumulativeBalanceMinutes > 0 ? 'linear-gradient(90deg, #22c55e 0%, #16a34a 100%)' : 'linear-gradient(90deg, #ef4444 0%, #f97316 100%)'};"
+          ></div>
+        {/if}
+      </div>
+
+      <!-- Labels -->
+      <div class="balance-footer">
+        <span class="balance-label balance-label--left">Retard</span>
+        <span class="balance-label balance-label--right">Avance</span>
       </div>
     </div>
   {/if}
@@ -178,6 +214,66 @@
     font-size: 0.8rem;
     font-weight: 700;
     color: #f97316;
+  }
+
+  .sidebar-card--balance {
+    background: linear-gradient(135deg, var(--color-bg-alt) 0%, var(--color-bg) 100%);
+    border-color: var(--color-border);
+  }
+
+  .balance-value {
+    font-size: 1.8rem;
+  }
+
+  .balance-positive {
+    color: #22c55e;
+  }
+
+  .balance-negative {
+    color: #ef4444;
+  }
+
+  .balance-bar {
+    position: relative;
+    height: 8px;
+    background: var(--color-bg);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: var(--space-sm);
+  }
+
+  .balance-bar-center {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    background: var(--color-border-strong);
+    transform: translateX(-50%);
+    z-index: 2;
+  }
+
+  .balance-bar-fill {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 999px;
+    transition: width 300ms ease;
+    z-index: 1;
+  }
+
+  .balance-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--space-xs);
+  }
+
+  .balance-label {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .sidebar-nav {

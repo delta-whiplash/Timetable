@@ -16,7 +16,7 @@ use crate::{
     },
     domain::{
         errors::{ApplicationError, ConfigError, StorageError, ValidationError},
-        logic::{default_entries, minutes_to_label, summarize_week},
+        logic::{default_entries, minutes_to_label, signed_minutes_to_label, summarize_week},
         types::{
             AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
             DefaultWorkInterval, DiagnosticSnapshot, OvertimeThresholdMinutes, ThemePreference,
@@ -75,6 +75,20 @@ impl ApplicationService {
         if let Ok(mut cache) = self.cached_settings.write() {
             *cache = None;
         }
+    }
+
+    fn week_to_view_with_balance(&self, week: &WeekSheet) -> Result<WeekSheetView, ApplicationError> {
+        let mut view = week_to_view(week).map_err(ApplicationError::from)?;
+        let balance = match self.week_repository.get_cumulative_balance(&week.week_start) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(week_start = %week.week_start.as_string(), ?error, "Failed to compute cumulative balance");
+                0
+            }
+        };
+        view.summary.cumulative_balance_minutes = balance;
+        view.summary.cumulative_balance_label = signed_minutes_to_label(balance);
+        Ok(view)
     }
 
     fn save_settings_and_cache(&self, settings: &AppSettings) -> Result<(), ApplicationError> {
@@ -137,7 +151,7 @@ impl ApplicationService {
         settings.active_week_id = Some(week.week_id.clone());
         self.save_settings_and_cache(&settings)?;
         info!(week_id = %week.week_id.0, "week saved");
-        week_to_view(&week).map_err(ApplicationError::from)
+        self.week_to_view_with_balance(&week)
     }
 
     pub fn create_or_switch_week(
@@ -147,7 +161,7 @@ impl ApplicationService {
         let settings = self.get_settings()?;
         let week_start = WeekStartDate::parse(&input.week_start)?;
         let week = self.ensure_week_for_date(week_start, &settings)?;
-        week_to_view(&week).map_err(ApplicationError::from)
+        self.week_to_view_with_balance(&week)
     }
 
     pub fn list_weeks(&self) -> Result<Vec<WeekListItem>, ApplicationError> {
@@ -363,12 +377,12 @@ impl ApplicationService {
     fn resolve_active_week(&self, settings: &AppSettings) -> Result<WeekSheetView, ApplicationError> {
         if let Some(active_week_id) = &settings.active_week_id {
             if let Some(week) = self.week_repository.get_week_by_id(active_week_id)? {
-                return week_to_view(&week).map_err(ApplicationError::from);
+                return self.week_to_view_with_balance(&week);
             }
         }
 
         let week = self.ensure_week_for_date(WeekStartDate::today(), settings)?;
-        week_to_view(&week).map_err(ApplicationError::from)
+        self.week_to_view_with_balance(&week)
     }
 
     fn ensure_week_for_date(

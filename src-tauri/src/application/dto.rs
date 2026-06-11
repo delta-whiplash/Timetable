@@ -106,6 +106,8 @@ pub struct WeekSummaryView {
     pub shortest_day: Option<DaySummaryView>,
     pub quick_read: String,
     pub percentage: u8,
+    pub cumulative_balance_minutes: i32,
+    pub cumulative_balance_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,6 +336,8 @@ pub fn week_to_view(week: &WeekSheet) -> Result<WeekSheetView, crate::domain::er
             } else {
                 0
             },
+            cumulative_balance_minutes: 0,
+            cumulative_balance_label: "+0h00".to_string(),
         },
     })
 }

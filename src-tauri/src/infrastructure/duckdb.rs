@@ -326,6 +326,30 @@ impl WeekRepository for DuckDbWeekRepository {
         Ok(())
     }
 
+    fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError> {
+        let connection = open_connection(&self.database_path)?;
+        let mut statement = map_storage_error(connection.prepare(
+            "SELECT COALESCE(SUM(
+                COALESCE(week_totals.total_minutes, 0) - w.overtime_threshold_minutes
+            ), 0)
+            FROM weeks w
+            LEFT JOIN (
+                SELECT week_id,
+                    SUM(CASE WHEN enabled = 1
+                        AND start_minutes IS NOT NULL
+                        AND end_minutes IS NOT NULL
+                    THEN end_minutes - start_minutes - break_minutes
+                    ELSE 0 END) as total_minutes
+                FROM day_entries
+                GROUP BY week_id
+            ) week_totals ON w.id = week_totals.week_id
+            WHERE w.week_start <= ?1",
+        ))?;
+        let balance: Result<i32, duckdb::Error> =
+            statement.query_row(params![up_to_week_start.as_string()], |row| row.get(0));
+        map_storage_error(balance)
+    }
+
     fn metadata(&self) -> Result<AppMetadata, StorageError> {
         let connection = open_connection(&self.database_path)?;
         let mut statement = map_storage_error(connection.prepare(
@@ -710,5 +734,83 @@ mod tests {
 
         assert_eq!(loaded.entries.len(), 7);
         assert_eq!(summarize_week(&loaded).expect("summary").worked_days, 5);
+    }
+
+    #[test]
+    fn cumulative_balance_no_weeks() {
+        let temp_dir = tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("balance_test.duckdb");
+        let week_repository = DuckDbWeekRepository::new(db_path);
+
+        week_repository.migrate().expect("migrations");
+
+        let balance = week_repository
+            .get_cumulative_balance(&WeekStartDate::today())
+            .expect("balance query");
+
+        assert_eq!(balance, 0);
+    }
+
+    #[test]
+    fn cumulative_balance_single_week_positive() {
+        let temp_dir = tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("balance_test.duckdb");
+        let week_repository = DuckDbWeekRepository::new(db_path.clone());
+        let settings_repository = DuckDbSettingsRepository::new(db_path);
+
+        week_repository.migrate().expect("migrations");
+        settings_repository.ensure_default_settings().expect("default settings");
+
+        let week = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::today(),
+            entries: default_entries(&default_configured_days()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        };
+
+        week_repository.save_week(&week).expect("save");
+
+        let balance = week_repository
+            .get_cumulative_balance(&week.week_start)
+            .expect("balance query");
+
+        let summary = summarize_week(&week).expect("summary");
+        assert_eq!(balance, summary.total_minutes.0 as i32 - 2100);
+    }
+
+    #[test]
+    fn cumulative_balance_multiple_weeks() {
+        let temp_dir = tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("balance_test.duckdb");
+        let week_repository = DuckDbWeekRepository::new(db_path.clone());
+        let settings_repository = DuckDbSettingsRepository::new(db_path);
+
+        week_repository.migrate().expect("migrations");
+        settings_repository.ensure_default_settings().expect("default settings");
+
+        let week1 = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::today(),
+            entries: default_entries(&default_configured_days()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        };
+        week_repository.save_week(&week1).expect("save week1");
+
+        let week2 = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::parse("2024-01-15").expect("parse date"),
+            entries: default_entries(&default_configured_days()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        };
+        week_repository.save_week(&week2).expect("save week2");
+
+        let balance = week_repository
+            .get_cumulative_balance(&WeekStartDate::today())
+            .expect("balance query");
+
+        let summary1 = summarize_week(&week1).expect("summary1");
+        let summary2 = summarize_week(&week2).expect("summary2");
+        let expected = (summary1.total_minutes.0 as i32 - 2100) + (summary2.total_minutes.0 as i32 - 2100);
+        assert_eq!(balance, expected);
     }
 }
