@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     name: Run Tests
@@ -50,6 +53,10 @@ jobs:
           workspaces: src-tauri
       - name: Install frontend dependencies
         run: npm ci
+      - name: Set MSVC compiler flags
+        run: |
+          echo "CXXFLAGS=/std:c++17 /EHsc" >> $env:GITHUB_ENV
+          echo "CFLAGS=/EHsc" >> $env:GITHUB_ENV
       - name: Build Tauri app
         run: npm run tauri:build
       - name: Upload NSIS installer
@@ -141,7 +148,7 @@ jobs:
           echo "Downloaded artifacts:"
           find artifacts -type f -name "*.exe" -o -name "*.msi" -o -name "*.AppImage" -o -name "*.dmg"
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/windows-nsis/*.exe
