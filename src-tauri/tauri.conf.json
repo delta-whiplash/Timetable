@@ -38,7 +38,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "targets": ["nsis"],
+    "targets": ["nsis", "msi", "appimage", "dmg"],
     "publisher": "Delta",
     "windows": {
       "certificateThumbprint": null,
