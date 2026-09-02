@@ -71,6 +71,7 @@ the domain core compiles standalone on Linux CI.
 | `load_settings` / `save_settings` | User preferences |
 | `set_theme` | Toggle light/dark |
 | `get_analytics` | Statistics and trends |
+| `export_week` | Export week as XLSX (dialog native) |
 
 ### Storage
 

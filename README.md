@@ -12,7 +12,7 @@ Application Windows légère pour le suivi et le calcul des heures de travail he
 - **Seuil configurable** : Définissez votre seuil d'heures supplémentaires (par défaut : 35h)
 - **Historique** : Consultez et gérez vos semaines précédentes
 - **Thèmes** : Interface en mode clair ou sombre
-- **Export/Import** : Sauvegardez ou transférez vos données facilement (JSON)
+- **Export Excel** : Exportez n'importe quelle semaine en XLSX (classeur micromanagement-grade avec totaux, heures sup, solde cumulé)
 - **Analytiques** : Statistiques par jour de la semaine, tendances hebdomadaires et mensuelles
 
 ## Interface
@@ -69,6 +69,19 @@ Dans l'onglet "Paramètres" :
 - Choisissez le **thème** (Clair/Sombre)
 
 Cliquez sur "Enregistrer" pour valider les modifications.
+
+### Exporter une semaine
+
+Pour partager vos horaires avec votre manager ou sauvegarder une semaine :
+- **Depuis la feuille de temps active** : cliquez sur le bouton "⬇ Exporter" en haut à droite
+- **Depuis l'historique** : cliquez sur "Exporter" à côté de chaque semaine listée
+
+L'application ouvre une boîte de dialogue native pour choisir l'emplacement du fichier. Le classeur Excel contient :
+- Titre avec la période couverte
+- 7 lignes (une par jour) : jour, activé, début, fin, pause, total en minutes, total en heures
+- Pied de tableau : total semaine, jours travaillés, heures supplémentaires, % de l'objectif atteint, solde cumulé
+
+Le fichier s'appelle par défaut `timetable-AAAA-MM-JJ.xlsx` (date du lundi de la semaine).
 
 ## Emplacement des données
 
