@@ -71,11 +71,38 @@ pub struct TimeOfDay(pub u16);
 
 impl TimeOfDay {
     pub fn parse(value: &str) -> Result<Self, ValidationError> {
-        let (hours, minutes) = value
-            .split_once(':')
-            .ok_or(ValidationError::InvalidTimeFormat)?;
-        let hours: u16 = hours.parse().map_err(|_| ValidationError::InvalidTimeFormat)?;
-        let minutes: u16 = minutes.parse().map_err(|_| ValidationError::InvalidTimeFormat)?;
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(ValidationError::InvalidTimeFormat);
+        }
+
+        // Normaliser H/h en séparateur :
+        let value = value.replace('h', ":").replace('H', ":");
+
+        let (hours, minutes) = if let Some((h, m)) = value.split_once(':') {
+            // Format HH:MM ou HH: (minutes optionnelles)
+            let hours: u16 = h.parse().map_err(|_| ValidationError::InvalidTimeFormat)?;
+            let minutes: u16 = if m.is_empty() {
+                0
+            } else {
+                m.parse().map_err(|_| ValidationError::InvalidTimeFormat)?
+            };
+            (hours, minutes)
+        } else if value.len() == 4 && value.chars().all(|c| c.is_ascii_digit()) {
+            // Format compact 4 chiffres (1830 -> 18:30)
+            let hours: u16 = value[0..2].parse().unwrap();
+            let minutes: u16 = value[2..4].parse().unwrap();
+            (hours, minutes)
+        } else if value.chars().all(|c| c.is_ascii_digit()) {
+            // Heures seules (18 -> 18:00)
+            let hours: u16 = value
+                .parse()
+                .map_err(|_| ValidationError::InvalidTimeFormat)?;
+            (hours, 0)
+        } else {
+            return Err(ValidationError::InvalidTimeFormat);
+        };
+
         if hours > 23 || minutes > 59 {
             return Err(ValidationError::InvalidTimeFormat);
         }
@@ -219,4 +246,30 @@ pub fn default_configured_days() -> Vec<ConfiguredDay> {
         enabled,
     })
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_time_formats() {
+        // Formats valides
+        assert_eq!(TimeOfDay::parse("18:00").unwrap().0, 18 * 60);
+        assert_eq!(TimeOfDay::parse("8:30").unwrap().0, 8 * 60 + 30);
+        assert_eq!(TimeOfDay::parse("18H").unwrap().0, 18 * 60);
+        assert_eq!(TimeOfDay::parse("18h").unwrap().0, 18 * 60);
+        assert_eq!(TimeOfDay::parse("18H30").unwrap().0, 18 * 60 + 30);
+        assert_eq!(TimeOfDay::parse("18h30").unwrap().0, 18 * 60 + 30);
+        assert_eq!(TimeOfDay::parse("18").unwrap().0, 18 * 60);
+        assert_eq!(TimeOfDay::parse("8").unwrap().0, 8 * 60);
+        assert_eq!(TimeOfDay::parse("1830").unwrap().0, 18 * 60 + 30);
+        assert_eq!(TimeOfDay::parse("0830").unwrap().0, 8 * 60 + 30);
+
+        // Formats invalides
+        assert!(TimeOfDay::parse("25:00").is_err());
+        assert!(TimeOfDay::parse("18:60").is_err());
+        assert!(TimeOfDay::parse("").is_err());
+        assert!(TimeOfDay::parse("abc").is_err());
+    }
 }
