@@ -78,10 +78,8 @@ timetable-desktop/
 │   │   ├── application/         # Couche application
 │   │   │   ├── service.rs       # ApplicationService
 │   │   │   ├── dto.rs           # DTOs Tauri
-│   │   │   └── ports.rs         # Traits de repository
 │   │   ├── infrastructure/      # Adaptateurs externes
-│   │   │   ├── duckdb.rs        # DuckDB impl
-│   │   │   ├── config.rs        # Config runtime
+│   │   │   ├── duckdb.rs        # DuckDB storage
 │   │   │   └── tracing.rs       # Logging
 │   │   └── lib.rs               # Point d'entrée, commands Tauri
 │   ├── icons/                   # Icônes application

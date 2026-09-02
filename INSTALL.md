@@ -196,15 +196,9 @@ Si non installé, téléchargez-le depuis le site Microsoft.
 **Vérifiez l'emplacement des données :**
 1. Allez dans `%APPDATA%\com.delta.timetable\`
 2. Vérifiez que le fichier `timetable.duckdb` existe
-3. Si vous avez une sauvegarde, utilisez la fonction **Importer** de l'application
 
 ### Je veux restaurer une sauvegarde
 
-**Via l'application :**
-1. Cliquez sur **📤 Importer un fichier**
-2. Sélectionnez votre fichier JSON exporté précédemment
-
-**Manuellement :**
 1. Fermez l'application
 2. Remplacez le fichier `%APPDATA%\com.delta.timetable\timetable.duckdb` par votre sauvegarde
 

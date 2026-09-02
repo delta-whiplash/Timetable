@@ -70,14 +70,6 @@ Dans l'onglet "Paramètres" :
 
 Cliquez sur "Enregistrer" pour valider les modifications.
 
-### Export/Import des données
-
-Pour sauvegarder ou transférer vos données :
-1. Cliquez sur **"📥 Exporter les données"** pour télécharger un fichier JSON
-2. Pour restaurer, cliquez sur **"📤 Importer un fichier"** et sélectionnez votre fichier JSON
-
-*Attention : L'import écrase les données existantes.*
-
 ## Emplacement des données
 
 Les données sont stockées dans :

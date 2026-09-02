@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Timetable Desktop is a Windows desktop application for tracking and calculating weekly work hours. Built with Tauri v2 + Rust (backend) and Svelte + TypeScript (frontend).
 
-**Key principle**: All time calculations (duration, average, overtime) happen in Rust. Frontend only displays results.
+**Key principle**: All time calculations (duration, overtime, cumulative balance) happen in Rust. Frontend only displays results.
 
 ## Commands
 
@@ -20,12 +20,14 @@ npm run dev            # Vite dev server only (port 1420)
 ```bash
 npm run build          # Build frontend
 npm run tauri:build    # Build Windows MSI installer
+.\build.ps1            # Full local Windows build
 ```
 
 ### Testing
 ```bash
 npm test               # Run Vitest tests
 npm run test:watch     # Vitest watch mode
+npm run test:e2e       # Playwright e2e (smoke tests, dev server)
 npm run check          # Svelte type checking
 cd src-tauri && cargo test                    # All Rust tests
 cd src-tauri && cargo test --no-default-features  # Backend core only (Linux-compatible)
@@ -44,34 +46,36 @@ cd src-tauri && env CARGO_HOME=/tmp/cargo cargo test --no-default-features
 
 Three-layer architecture:
 - **domain/**: Pure business logic (types.rs, logic.rs, errors.rs) — no external deps
-- **application/**: Use cases (service.rs), DTOs (dto.rs), repository traits (ports.rs)
-- **infrastructure/**: DuckDB adapters (duckdb.rs), config, tracing
+- **application/**: Use cases (service.rs), DTOs (dto.rs)
+- **infrastructure/**: DuckDB storage (duckdb.rs), tracing
+
+`ApplicationService` holds a single concrete `Arc<DuckDb>` store — no trait
+abstraction layer. The `storage-duckdb` feature gates the store and service so
+the domain core compiles standalone on Linux CI.
 
 ### Frontend (Svelte in `src/`)
 - `src/lib/api.ts`: Tauri command wrappers
 - `src/lib/types.ts`: TypeScript types mirroring Rust DTOs
+- `src/lib/time.ts`: HH:MM <-> minutes helpers
 - `src/lib/stores/`: Svelte stores (state.ts, app.ts)
 
 ### Tauri Commands
 
 | Command | Purpose |
 |---------|---------|
-| `load_bootstrap` | Initial app state (theme, active week, version) |
-| `get_active_week` | Current week's timesheet |
+| `load_bootstrap` | Initial app state (active week) |
 | `save_week` | Persist week entries |
 | `create_or_switch_week` | Navigate to different week |
 | `list_weeks` | History panel data |
 | `delete_week` | Remove a week |
 | `load_settings` / `save_settings` | User preferences |
 | `set_theme` | Toggle light/dark |
-| `get_app_status` | Diagnostic panel data |
-| `export_data` / `import_data` | JSON backup/restore |
 | `get_analytics` | Statistics and trends |
 
 ### Storage
 
 DuckDB database at `%APPDATA%\com.delta.timetable\timetable.duckdb`:
-- `weeks`, `day_entries`, `settings`, `diagnostic_snapshots`, `app_metadata`
+- `weeks`, `day_entries`, `settings`
 
 ### Features (Cargo.toml)
 
@@ -88,28 +92,15 @@ When modifying domain types:
 
 ## Error Handling
 
-Backend errors flow as `ApplicationError` → `PublicError` with French user messages. Frontend receives `CommandError` with `code`, `message`, `correlationId`, `retryable`.
+Backend errors flow as `ApplicationError` → `PublicError` (French user message
+only). The frontend maps failures to `CommandError` with its own `code` and a
+fresh `correlationId` from `crypto.randomUUID()`.
 
 Validation errors: `invalid_time_range`, `break_exceeds_day`, `missing_time_input`, etc.
 
 ## French Language
 
 Application is in French. User-facing strings, day labels (Lundi, Mardi...), error messages in French.
-
-## Recent Changes (v0.9.0)
-
-### Navigation Fixes
-- **savingWeek flag**: Now properly set during persistWeek to disable UI during save
-- **switchingWeek flag**: New flag in AppState to disable navigation during week switching
-- **flushPendingChanges**: Now async + awaited to prevent data loss on rapid navigation
-- **Throttle**: 100ms throttle on week selector buttons to prevent race conditions
-- **formatDate**: Uses local date format (no timezone shift from `toISOString()`)
-
-### Performance Optimizations
-- **Settings cache**: `Arc<RwLock<Option<AppSettings>>>` in ApplicationService reduces 8+ DB reads to 1
-- **N+1 query fix**: `list_weeks` now uses single JOIN query instead of N+1 pattern
-- **Selective refresh**: `refreshHistoryOnly()` for week operations (avoids 3 backend calls)
-- **Vite config**: Excludes `src-tauri/target/**` from watch to fix EBUSY on Windows
 
 ## Reference
 

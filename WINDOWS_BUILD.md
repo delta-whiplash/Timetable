@@ -40,12 +40,6 @@ Téléchargez depuis : https://visualstudio.microsoft.com/downloads/
 
 Une fois les prérequis installés :
 
-```cmd
-cd C:\Users\Delta\Documents\Timetable
-build.bat
-```
-
-Ou avec PowerShell :
 ```powershell
 cd C:\Users\Delta\Documents\Timetable
 .\build.ps1
