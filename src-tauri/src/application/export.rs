@@ -20,6 +20,71 @@ pub struct ExportSheet {
 
 const NO_TIME: &str = "--:--";
 
+/// Index de la colonne « Total (min) » — écrite en nombre pour rester
+/// sommable/pivotable dans Excel.
+const MINUTES_COLUMN: usize = 5;
+
+/// Sérialise la feuille en classeur XLSX (mapping 1:1, sans logique de calcul).
+pub fn sheet_to_xlsx(sheet: &ExportSheet) -> Vec<u8> {
+    use rust_xlsxwriter::{Color, Format, Workbook};
+
+    let bold = Format::new().set_bold();
+    let title_format = Format::new().set_bold().set_font_size(14);
+    let header_format = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xDCE6F1));
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.set_name("Semaine").expect("nom de feuille");
+
+    // Titre fusionné sur la largeur du tableau
+    let last_col = (sheet.header.len() as u16).saturating_sub(1);
+    worksheet
+        .merge_range(0, 0, 0, last_col, &sheet.title, &title_format)
+        .expect("titre");
+
+    for (index, (key, value)) in sheet.meta.iter().enumerate() {
+        let row = 1 + index as u32;
+        worksheet.write_with_format(row, 0, key.as_str(), &bold).expect("meta clé");
+        worksheet.write(row, 1, value.as_str()).expect("meta valeur");
+    }
+
+    let header_row = 2 + sheet.meta.len() as u32;
+    for (col, heading) in sheet.header.iter().enumerate() {
+        worksheet
+            .write_with_format(header_row, col as u16, *heading, &header_format)
+            .expect("en-tête");
+    }
+
+    for (row_offset, row) in sheet.rows.iter().enumerate() {
+        for (col, cell) in row.iter().enumerate() {
+            let cell_ref = (header_row + 1 + row_offset as u32, col as u16);
+            if col == MINUTES_COLUMN {
+                worksheet
+                    .write(cell_ref.0, cell_ref.1, cell.parse::<u32>().unwrap_or(0))
+                    .expect("cellule minutes");
+            } else {
+                worksheet.write(cell_ref.0, cell_ref.1, cell.as_str()).expect("cellule");
+            }
+        }
+    }
+
+    let footer_start = header_row + 1 + sheet.rows.len() as u32 + 1;
+    for (index, (label, value)) in sheet.footer.iter().enumerate() {
+        let row = footer_start + index as u32;
+        worksheet.write_with_format(row, 0, label.as_str(), &bold).expect("pied libellé");
+        worksheet.write(row, 1, value.as_str()).expect("pied valeur");
+    }
+
+    worksheet.set_column_width(0, 24).expect("largeur colonne");
+    for col in 1..=last_col {
+        worksheet.set_column_width(col, 12).expect("largeur colonne");
+    }
+
+    workbook.save_to_buffer().expect("classeur xlsx")
+}
+
 /// Construit la feuille exportable d'une semaine, solde cumulé inclus.
 /// Échoue si la semaine contient des données invalides (validées à la
 /// sauvegarde, donc en pratique jamais vues ici).
@@ -219,5 +284,21 @@ mod tests {
         // La pause par défaut ne doit pas fuir sur le dimanche sans horaire
         assert_eq!(sheet(0).rows[6][4], "00:00");
         assert_ne!(default_break(), BreakMinutes(0));
+    }
+
+    #[test]
+    fn le_classeur_est_un_zip_xlsx_valide() {
+        let bytes = sheet_to_xlsx(&sheet(150));
+        assert_eq!(&bytes[..4], b"PK\x03\x04", "un xlsx est un zip");
+        assert!(bytes.len() > 500, "classeur suspiciousement maigre: {} o", bytes.len());
+    }
+
+    #[test]
+    fn deux_semaines_differentes_donnent_deux_classeurs_differents() {
+        let bytes_a = sheet_to_xlsx(&sheet(150));
+        let mut autre = sheet(150);
+        autre.rows[0][6] = "8h00".to_string();
+        let bytes_b = sheet_to_xlsx(&autre);
+        assert_ne!(bytes_a, bytes_b);
     }
 }
