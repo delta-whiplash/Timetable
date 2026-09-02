@@ -11,6 +11,7 @@ import type {
 import {
   createOrSwitchWeek,
   deleteWeek,
+  exportWeek,
   getAnalytics,
   listWeeks,
   loadBootstrap,
@@ -135,6 +136,17 @@ function createAppStore() {
     }
   }
 
+  async function triggerExport(weekStart: string) {
+    try {
+      const path = await exportWeek(weekStart);
+      if (path) {
+        update((state) => ({ ...state, notice: `Export enregistré : ${path}` }));
+      }
+    } catch (error) {
+      update((state) => ({ ...state, error: toCommandError(error) }));
+    }
+  }
+
   return {
     subscribe,
     bootstrap,
@@ -143,7 +155,8 @@ function createAppStore() {
     persistSettings,
     changeTheme,
     removeWeek,
-    loadAnalytics
+    loadAnalytics,
+    triggerExport
   };
 }
 

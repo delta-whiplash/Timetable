@@ -17,6 +17,7 @@ export interface AppState {
   settings: SettingsView | null;
   history: WeekListItem[];
   analytics: AnalyticsDataView | null;
+  notice: string | null;
 }
 
 const INITIAL_STATE: AppState = {
@@ -29,7 +30,8 @@ const INITIAL_STATE: AppState = {
   activeWeek: null,
   settings: null,
   history: [],
-  analytics: null
+  analytics: null,
+  notice: null
 };
 
 export function initialAppState(): AppState {

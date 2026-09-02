@@ -7,6 +7,7 @@
   export let loading = false;
   export let onSelect: (weekStart: string) => void;
   export let onDelete: (weekId: string) => void;
+  export let onExport: (weekStart: string) => void;
 
   let showDeleteModal = false;
   let weekToDelete: { id: string; start: string } | null = null;
@@ -53,6 +54,9 @@
           </div>
 
           <div class="history-actions">
+            <button class="button" type="button" on:click={() => onExport(item.weekStart)}>
+              Exporter
+            </button>
             <button class="button" type="button" on:click={() => onSelect(item.weekStart)}>
               Ouvrir
             </button>

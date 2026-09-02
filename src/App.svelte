@@ -135,6 +135,10 @@
         <strong>{state.error.message}</strong>
         <span>Code: {state.error.code} · Corrélation: {state.error.correlationId}</span>
       </section>
+    {:else if state.notice}
+      <section class="notice">
+        <span>{state.notice}</span>
+      </section>
     {/if}
 
     <div class="app-layout">
@@ -151,11 +155,21 @@
               <h1>Semaine active</h1>
               <span class="save-indicator" class:show={hasPendingChanges}>● Enregistrement...</span>
             </div>
-            <WeekSelector
-              weekStart={state.activeWeek.weekStart}
-              disabled={state.savingWeek || state.switchingWeek}
-              on:change={(e) => handleWeekChange(e.detail)}
-            />
+            <div class="content-header-actions">
+              <button
+                class="export-button"
+                type="button"
+                on:click={() => appStore.triggerExport(state.activeWeek!.weekStart)}
+                disabled={state.savingWeek || state.switchingWeek}
+              >
+                ⬇ Exporter
+              </button>
+              <WeekSelector
+                weekStart={state.activeWeek.weekStart}
+                disabled={state.savingWeek || state.switchingWeek}
+                on:change={(e) => handleWeekChange(e.detail)}
+              />
+            </div>
           </header>
 
           {#if activeTab === "timesheet"}
@@ -183,6 +197,7 @@
                 loading={state.loading}
                 onSelect={handleOpenFromHistory}
                 onDelete={(weekId: string) => appStore.removeWeek(weekId)}
+                onExport={(weekStart: string) => appStore.triggerExport(weekStart)}
               />
             </div>
 
@@ -259,6 +274,33 @@
     letter-spacing: -0.03em;
   }
 
+  .content-header-actions {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+  }
+
+  .export-button {
+    padding: 8px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .export-button:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+    border-color: var(--color-border-strong);
+  }
+
+  .export-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .save-indicator {
     font-size: 0.75rem;
     color: var(--color-text-muted);
@@ -309,6 +351,17 @@
     background: var(--color-surface);
     border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
     border-radius: var(--radius-lg);
+  }
+
+  .notice {
+    max-width: 1400px;
+    margin: 0 auto var(--space-md);
+    padding: var(--space-md) 20px;
+    background: var(--color-surface);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    color: var(--color-text);
   }
 
   @media (max-width: 900px) {

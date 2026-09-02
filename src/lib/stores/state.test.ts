@@ -9,6 +9,7 @@ describe("state helpers", () => {
     expect(state.loading).toBe(true);
     expect(state.activeWeek).toBeNull();
     expect(state.history).toEqual([]);
+    expect(state.notice).toBeNull();
   });
 
   it("maps invoke failures to a safe command error", () => {

@@ -46,3 +46,7 @@ export function setTheme(theme: string): Promise<void> {
 export function getAnalytics(): Promise<AnalyticsDataView> {
   return invoke("get_analytics");
 }
+
+export function exportWeek(weekStart: string): Promise<string | null> {
+  return invoke("export_week", { weekStart });
+}
