@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    logic::{calculate_day_minutes, minutes_to_human_label, minutes_to_label, summarize_week},
+    logic::{
+        calculate_day_minutes, minutes_to_human_label, minutes_to_label, summarize_week,
+        threshold_percentage,
+    },
     types::{AppSettings, ConfiguredDay, TimeOfDay, WeekSheet},
 };
 
@@ -218,12 +221,7 @@ pub fn week_to_view(
         overtime_threshold_minutes: week.overtime_threshold.0,
         summary: WeekSummaryView {
             total_label: minutes_to_label(summary.total_minutes),
-            percentage: if week.overtime_threshold.0 > 0 {
-                (u32::from(summary.total_minutes) * 100 / u32::from(week.overtime_threshold.0))
-                    .min(255) as u8
-            } else {
-                0
-            },
+            percentage: threshold_percentage(summary.total_minutes, week.overtime_threshold.0),
             cumulative_balance_minutes,
             cumulative_balance_label: crate::domain::logic::signed_minutes_to_label(
                 cumulative_balance_minutes,

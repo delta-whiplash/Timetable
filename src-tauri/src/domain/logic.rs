@@ -122,6 +122,14 @@ pub fn signed_minutes_to_label(minutes: i32) -> String {
     }
 }
 
+/// Pourcentage de l'objectif atteint (saturé, jamais de division par zéro).
+pub fn threshold_percentage(total_minutes: u16, threshold_minutes: u16) -> u8 {
+    if threshold_minutes == 0 {
+        return 0;
+    }
+    (u32::from(total_minutes) * 100 / u32::from(threshold_minutes)).min(255) as u8
+}
+
 pub fn default_settings() -> super::types::AppSettings {
     super::types::AppSettings {
         overtime_threshold: super::types::OvertimeThresholdMinutes(35 * 60),

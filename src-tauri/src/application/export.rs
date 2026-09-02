@@ -1,0 +1,223 @@
+//! Construction de la feuille de temps exportable (modèle pur, sans I/O).
+
+use crate::domain::{
+    errors::ValidationError,
+    logic::{calculate_day_minutes, minutes_to_label, signed_minutes_to_label, summarize_week, threshold_percentage},
+    types::WeekSheet,
+};
+
+/// Feuille de temps prête à sérialiser : titre, métadonnées, tableau des
+/// jours et ligne de totaux. Structure volontairement plate pour être
+/// testée unitairement avant toute écriture XLSX.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportSheet {
+    pub title: String,
+    pub meta: Vec<(String, String)>,
+    pub header: Vec<&'static str>,
+    pub rows: Vec<Vec<String>>,
+    pub footer: Vec<(String, String)>,
+}
+
+const NO_TIME: &str = "--:--";
+
+/// Construit la feuille exportable d'une semaine, solde cumulé inclus.
+/// Échoue si la semaine contient des données invalides (validées à la
+/// sauvegarde, donc en pratique jamais vues ici).
+pub fn build_export_sheet(
+    week: &WeekSheet,
+    cumulative_balance: i32,
+) -> Result<ExportSheet, ValidationError> {
+    let summary = summarize_week(week)?;
+    let sunday = week.week_start.0 + chrono::Duration::days(6);
+
+    let rows = week
+        .entries
+        .iter()
+        .map(|entry| {
+            let total = calculate_day_minutes(entry)?;
+            Ok(vec![
+                entry.label.0.clone(),
+                if entry.enabled { "Oui" } else { "Non" }.to_string(),
+                entry
+                    .interval
+                    .as_ref()
+                    .map(|interval| interval.start.to_hhmm())
+                    .unwrap_or_else(|| NO_TIME.to_string()),
+                entry
+                    .interval
+                    .as_ref()
+                    .map(|interval| interval.end.to_hhmm())
+                    .unwrap_or_else(|| NO_TIME.to_string()),
+                crate::domain::types::TimeOfDay(entry.break_minutes.0).to_hhmm(),
+                total.to_string(),
+                minutes_to_label(total),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(ExportSheet {
+        title: format!(
+            "Feuille de temps — Semaine du {} au {}",
+            week.week_start.0.format("%d/%m/%Y"),
+            sunday.format("%d/%m/%Y")
+        ),
+        meta: vec![(
+            "Seuil heures supplémentaires".to_string(),
+            minutes_to_label(week.overtime_threshold.0),
+        )],
+        header: vec!["Jour", "Activé", "Début", "Fin", "Pause", "Total (min)", "Total"],
+        rows,
+        footer: vec![
+            ("Total semaine".to_string(), minutes_to_label(summary.total_minutes)),
+            ("Jours travaillés".to_string(), summary.worked_days.to_string()),
+            (
+                "Heures supplémentaires".to_string(),
+                minutes_to_label(summary.total_minutes.saturating_sub(week.overtime_threshold.0)),
+            ),
+            (
+                "Objectif atteint".to_string(),
+                format!(
+                    "{} %",
+                    threshold_percentage(summary.total_minutes, week.overtime_threshold.0)
+                ),
+            ),
+            (
+                "Solde cumulé".to_string(),
+                signed_minutes_to_label(cumulative_balance),
+            ),
+        ],
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::logic::{default_break, minutes_to_label, signed_minutes_to_label};
+    use crate::domain::types::{
+        BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, WeekId,
+        WeekStartDate, WorkInterval,
+    };
+
+    fn day(day_id: u8, label: &str, start: Option<(u16, u16)>, break_minutes: u16, enabled: bool) -> DayEntry {
+        DayEntry {
+            day_id: DayId(day_id),
+            label: DayLabel(label.to_string()),
+            interval: start.map(|(start, end)| WorkInterval {
+                start: TimeOfDay(start),
+                end: TimeOfDay(end),
+            }),
+            break_minutes: BreakMinutes(break_minutes),
+            enabled,
+        }
+    }
+
+    fn fixture_week() -> WeekSheet {
+        let h = |hh: u16, mm: u16| hh * 60 + mm;
+        WeekSheet {
+            week_id: WeekId("fixture".to_string()),
+            week_start: WeekStartDate::parse("2026-09-07").expect("lundi valide"),
+            entries: vec![
+                day(0, "Lundi", Some((h(8, 0), h(18, 0))), 60, true),
+                day(1, "Mardi", Some((h(8, 0), h(17, 30))), 30, true),
+                day(2, "Mercredi", Some((h(9, 0), h(17, 0))), 60, true),
+                day(3, "Jeudi", Some((h(8, 0), h(18, 0))), 60, true),
+                day(4, "Vendredi", Some((h(8, 0), h(16, 0))), 30, true),
+                // Samedi désactivé mais horaires préservés (comme en base)
+                day(5, "Samedi", Some((h(8, 0), h(18, 0))), 60, false),
+                // Dimanche désactivé sans horaire
+                day(6, "Dimanche", None, 0, false),
+            ],
+            overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        }
+    }
+
+    fn sheet(balance: i32) -> ExportSheet {
+        build_export_sheet(&fixture_week(), balance).expect("semaine valide")
+    }
+
+    #[test]
+    fn le_titre_couvre_toute_la_semaine() {
+        assert_eq!(
+            sheet(150).title,
+            "Feuille de temps — Semaine du 07/09/2026 au 13/09/2026"
+        );
+    }
+
+    #[test]
+    fn les_meta_mentionnent_le_seuil_heures_sup() {
+        assert!(sheet(150)
+            .meta
+            .contains(&("Seuil heures supplémentaires".to_string(), minutes_to_label(35 * 60))));
+    }
+
+    #[test]
+    fn les_en_tetes_sont_stables_pour_la_retrocompat() {
+        assert_eq!(
+            sheet(150).header,
+            vec!["Jour", "Activé", "Début", "Fin", "Pause", "Total (min)", "Total"]
+        );
+    }
+
+    #[test]
+    fn sept_lignes_une_par_jour() {
+        assert_eq!(sheet(150).rows.len(), 7);
+    }
+
+    #[test]
+    fn jour_actif_format_complet() {
+        assert_eq!(
+            sheet(150).rows[0],
+            vec!["Lundi", "Oui", "08:00", "18:00", "01:00", "540", "9h00"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn jour_desactive_conserve_ses_horaires() {
+        assert_eq!(
+            sheet(150).rows[5],
+            vec!["Samedi", "Non", "08:00", "18:00", "01:00", "0", "0h00"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn jour_sans_horaire_affiche_tirets() {
+        assert_eq!(
+            sheet(150).rows[6],
+            vec!["Dimanche", "Non", "--:--", "--:--", "00:00", "0", "0h00"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn les_totaux_micromanagement_grade() {
+        // 540 + 540 + 420 + 540 + 450 = 2490 min = 41h30
+        let footer = sheet(150).footer;
+        assert!(footer.contains(&("Total semaine".to_string(), "41h30".to_string())));
+        assert!(footer.contains(&("Jours travaillés".to_string(), "5".to_string())));
+        assert!(footer.contains(&("Heures supplémentaires".to_string(), "6h30".to_string())));
+        assert!(footer.contains(&("Objectif atteint".to_string(), "118 %".to_string())));
+        assert!(footer.contains(&("Solde cumulé".to_string(), signed_minutes_to_label(150))));
+    }
+
+    #[test]
+    fn solde_cumulé_négatif_s_affiche_avec_signe() {
+        assert!(sheet(-60)
+            .footer
+            .contains(&("Solde cumulé".to_string(), "-1h00".to_string())));
+    }
+
+    #[test]
+    fn pause_nulle_sur_jour_sans_horaire() {
+        // La pause par défaut ne doit pas fuir sur le dimanche sans horaire
+        assert_eq!(sheet(0).rows[6][4], "00:00");
+        assert_ne!(default_break(), BreakMinutes(0));
+    }
+}
