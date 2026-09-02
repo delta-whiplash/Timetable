@@ -210,8 +210,8 @@ pub fn week_to_view(
                 day_id: entry.day_id.0,
                 label: entry.label.0.clone(),
                 enabled: entry.enabled,
-                start: entry.intervals.first().map(|interval| interval.start.to_hhmm()),
-                end: entry.intervals.first().map(|interval| interval.end.to_hhmm()),
+                start: entry.interval.as_ref().map(|interval| interval.start.to_hhmm()),
+                end: entry.interval.as_ref().map(|interval| interval.end.to_hhmm()),
                 break_time: crate::domain::types::TimeOfDay(entry.break_minutes.0).to_hhmm(),
                 total_minutes,
                 total_label: minutes_to_label(total_minutes),
@@ -225,9 +225,9 @@ pub fn week_to_view(
         entries,
         overtime_threshold_minutes: week.overtime_threshold.0,
         summary: WeekSummaryView {
-            total_label: minutes_to_label(summary.total_minutes.0),
+            total_label: minutes_to_label(summary.total_minutes),
             percentage: if week.overtime_threshold.0 > 0 {
-                (u32::from(summary.total_minutes.0) * 100 / u32::from(week.overtime_threshold.0))
+                (u32::from(summary.total_minutes) * 100 / u32::from(week.overtime_threshold.0))
                     .min(255) as u8
             } else {
                 0

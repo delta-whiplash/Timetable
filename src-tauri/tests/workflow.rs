@@ -5,11 +5,10 @@ use std::sync::Arc;
 use timetable_desktop_lib::{
     application::{
         dto::{SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput},
-        ports::{SettingsRepository, WeekRepository},
         service::ApplicationService,
     },
     domain::{logic::default_settings, types::WeekStartDate},
-    infrastructure::duckdb::{DuckDbSettingsRepository, DuckDbWeekRepository},
+    infrastructure::duckdb::DuckDb,
 };
 use tempfile::tempdir;
 
@@ -18,17 +17,12 @@ fn saves_week_and_updates_summary() {
     let temp_dir = tempdir().expect("temp dir");
     let db_path = temp_dir.path().join("workflow.duckdb");
 
-    let week_repository = Arc::new(DuckDbWeekRepository::new(db_path.clone()));
-    let settings_repository = Arc::new(DuckDbSettingsRepository::new(db_path.clone()));
+    let store = Arc::new(DuckDb::new(db_path));
 
-    week_repository.migrate().expect("migrate");
-    settings_repository.ensure_default_settings().expect("default settings");
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
 
-    let service = ApplicationService::new(
-        week_repository.clone(),
-        settings_repository,
-        week_repository,
-    );
+    let service = ApplicationService::new(store);
 
     let bootstrap = service.load_bootstrap().expect("bootstrap");
     assert_eq!(bootstrap.active_week.entries.len(), 7);

@@ -1,6 +1,5 @@
 use serde::Serialize;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug, Error, Clone)]
 pub enum ValidationError {
@@ -10,8 +9,6 @@ pub enum ValidationError {
     BreakExceedsDay { day_id: u8 },
     #[error("empty_label")]
     EmptyLabel { day_id: u8 },
-    #[error("too_many_intervals")]
-    TooManyIntervals { day_id: u8 },
     #[error("missing_time_input")]
     MissingTimeInput { day_id: u8 },
     #[error("invalid_threshold")]
@@ -54,40 +51,14 @@ pub enum ApplicationError {
     Config(#[from] ConfigError),
 }
 
+/// Erreur sérialisée côté frontend : seul le message utilisateur est exposé.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicError {
-    pub code: String,
     pub message: String,
-    pub correlation_id: String,
-    pub retryable: bool,
 }
 
 impl ApplicationError {
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Validation(error) => match error {
-                ValidationError::InvalidTimeRange { .. } => "validation.invalid_time_range",
-                ValidationError::BreakExceedsDay { .. } => "validation.break_exceeds_day",
-                ValidationError::EmptyLabel { .. } => "validation.empty_label",
-                ValidationError::TooManyIntervals { .. } => "validation.too_many_intervals",
-                ValidationError::MissingTimeInput { .. } => "validation.missing_time_input",
-                ValidationError::InvalidThreshold => "validation.invalid_threshold",
-                ValidationError::InvalidWeekStart => "validation.invalid_week_start",
-                ValidationError::InvalidTimeFormat => "validation.invalid_time_format",
-                ValidationError::InvalidDayConfiguration => "validation.invalid_day_configuration",
-            },
-            Self::Storage(error) => match error {
-                StorageError::StorageUnavailable => "storage.unavailable",
-                StorageError::QueryFailed => "storage.query_failed",
-                StorageError::SerializationFailed => "storage.serialization_failed",
-                StorageError::EntityNotFound => "storage.entity_not_found",
-            },
-            Self::Config(ConfigError::Invalid) => "config.invalid",
-            Self::Config(ConfigError::Serialization { .. }) => "config.serialization_failed",
-        }
-    }
-
     pub fn user_message(&self) -> &'static str {
         match self {
             Self::Validation(error) => match error {
@@ -98,9 +69,6 @@ impl ApplicationError {
                     "La pause ne peut pas être plus longue que la journée."
                 }
                 ValidationError::EmptyLabel { .. } => "Chaque jour doit avoir un libellé valide.",
-                ValidationError::TooManyIntervals { .. } => {
-                    "La version actuelle n'autorise qu'une seule plage horaire par jour."
-                }
                 ValidationError::MissingTimeInput { .. } => {
                     "Les heures de début et de fin sont requises pour un jour actif."
                 }
@@ -137,22 +105,12 @@ impl ApplicationError {
             }
         }
     }
-
-    pub fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Storage(StorageError::StorageUnavailable | StorageError::QueryFailed)
-        )
-    }
 }
 
 impl From<ApplicationError> for PublicError {
     fn from(value: ApplicationError) -> Self {
         Self {
-            code: value.code().to_string(),
             message: value.user_message().to_string(),
-            correlation_id: Uuid::new_v4().to_string(),
-            retryable: value.retryable(),
         }
     }
 }

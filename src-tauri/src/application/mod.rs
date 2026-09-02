@@ -1,3 +1,3 @@
 pub mod dto;
-pub mod ports;
+#[cfg(feature = "storage-duckdb")]
 pub mod service;

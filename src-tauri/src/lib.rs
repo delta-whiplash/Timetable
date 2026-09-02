@@ -14,13 +14,11 @@ mod desktop {
                 AnalyticsDataView, BootstrapState, DeleteWeekInput, SaveSettingsInput,
                 SaveWeekInput, SettingsView, WeekListItem, WeekSelectorInput, WeekSheetView,
             },
-            ports::{SettingsRepository, WeekRepository},
             service::ApplicationService,
         },
         domain::errors::{ApplicationError, PublicError},
         infrastructure::{
-            config::AppRuntimeConfig,
-            duckdb::{DuckDbSettingsRepository, DuckDbWeekRepository},
+            duckdb::DuckDb,
             tracing::init_tracing,
         },
     };
@@ -31,7 +29,7 @@ mod desktop {
 
     fn to_public_error(context: &'static str, error: ApplicationError) -> PublicError {
         if !matches!(error, ApplicationError::Validation(_)) {
-            tracing::error!(context, code = error.code(), "tauri command failed");
+            tracing::error!(context, error = %error, "tauri command failed");
         }
         error.into()
     }
@@ -142,33 +140,18 @@ mod desktop {
                         Box::new(std::io::Error::other(error))
                     })?;
 
-                let runtime_config = AppRuntimeConfig::new(
-                    app_data_dir.join("timetable.duckdb"),
-                    env!("CARGO_PKG_NAME"),
-                    env!("CARGO_PKG_VERSION"),
-                    "com.delta.timetable",
-                    1,
-                );
+                let store = Arc::new(DuckDb::new(app_data_dir.join("timetable.duckdb")));
 
-                let week_repository =
-                    Arc::new(DuckDbWeekRepository::new(runtime_config.database_path.clone()));
-                let settings_repository =
-                    Arc::new(DuckDbSettingsRepository::new(runtime_config.database_path.clone()));
-
-                week_repository
+                store
                     .migrate()
                     .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
-                settings_repository
+                store
                     .ensure_default_settings()
                     .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
 
-                let service = Arc::new(ApplicationService::new(
-                    week_repository.clone(),
-                    settings_repository,
-                    week_repository, // DuckDbWeekRepository implémente aussi AnalyticsRepository
-                ));
-
-                app.manage(SharedState { service });
+                app.manage(SharedState {
+                    service: Arc::new(ApplicationService::new(store)),
+                });
                 Ok(())
             })
             .invoke_handler(tauri::generate_handler![

@@ -1,8 +1,8 @@
 use super::{
     errors::ValidationError,
     types::{
-        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, DefaultBreakMinutes,
-        DefaultWorkInterval, ThemePreference, WeekSheet, WeekSummary, WorkedMinutes, WorkInterval,
+        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, ThemePreference,
+        WeekSheet, WeekSummary, WorkInterval,
     },
 };
 
@@ -29,17 +29,6 @@ pub fn default_break() -> BreakMinutes {
     BreakMinutes(60)
 }
 
-pub fn default_work_interval() -> DefaultWorkInterval {
-    DefaultWorkInterval {
-        start: super::types::TimeOfDay(8 * 60),
-        end: super::types::TimeOfDay(18 * 60),
-    }
-}
-
-pub fn default_break_minutes() -> DefaultBreakMinutes {
-    DefaultBreakMinutes(60)
-}
-
 pub fn default_theme() -> ThemePreference {
     ThemePreference::Dark
 }
@@ -51,7 +40,7 @@ pub fn default_entries(configured_days: &[ConfiguredDay]) -> Vec<DayEntry> {
         .map(|day| DayEntry {
             day_id: day.day_id,
             label: day.label,
-            intervals: if day.enabled { vec![default_interval()] } else { Vec::new() },
+            interval: if day.enabled { Some(default_interval()) } else { None },
             break_minutes: default_break(),
             enabled: day.enabled,
         })
@@ -65,19 +54,12 @@ pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
         });
     }
 
-    if entry.intervals.len() > 1 {
-        return Err(ValidationError::TooManyIntervals {
-            day_id: entry.day_id.0,
-        });
-    }
-
     if !entry.enabled {
         return Ok(());
     }
 
     let interval = entry
-        .intervals
-        .first()
+        .interval
         .ok_or(ValidationError::MissingTimeInput {
             day_id: entry.day_id.0,
         })?;
@@ -103,7 +85,7 @@ pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
         return Ok(0);
     }
 
-    let Some(interval) = entry.intervals.first() else {
+    let Some(interval) = entry.interval else {
         return Ok(0);
     };
 
@@ -123,7 +105,7 @@ pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError>
     }
 
     Ok(WeekSummary {
-        total_minutes: WorkedMinutes(total),
+        total_minutes: total,
         worked_days,
     })
 }
@@ -144,8 +126,8 @@ pub fn default_settings() -> super::types::AppSettings {
     super::types::AppSettings {
         overtime_threshold: super::types::OvertimeThresholdMinutes(35 * 60),
         theme: default_theme(),
-        default_work_interval: default_work_interval(),
-        default_break_minutes: default_break_minutes(),
+        default_work_interval: default_interval(),
+        default_break_minutes: default_break(),
         configured_days: default_configured_days(),
         active_week_id: None,
     }
@@ -165,10 +147,10 @@ mod tests {
         DayEntry {
             day_id: DayId(day_id),
             label: DayLabel(format!("Jour {day_id}")),
-            intervals: vec![WorkInterval {
+            interval: Some(WorkInterval {
                 start: TimeOfDay(start),
                 end: TimeOfDay(end),
-            }],
+            }),
             break_minutes: BreakMinutes(break_minutes),
             enabled: true,
         }
@@ -188,7 +170,7 @@ mod tests {
 
         let summary = summarize_week(&sheet).expect("summary should be valid");
 
-        assert_eq!(summary.total_minutes.0, 1050);
+        assert_eq!(summary.total_minutes, 1050);
         assert_eq!(summary.worked_days, 2);
     }
 

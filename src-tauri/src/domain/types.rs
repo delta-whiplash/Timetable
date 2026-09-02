@@ -108,10 +108,6 @@ impl TimeOfDay {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct WorkedMinutes(pub u16);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct BreakMinutes(pub u16);
 
 impl BreakMinutes {
@@ -134,16 +130,6 @@ impl OvertimeThresholdMinutes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct DefaultBreakMinutes(pub u16);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DefaultWorkInterval {
-    pub start: TimeOfDay,
-    pub end: TimeOfDay,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkInterval {
     pub start: TimeOfDay,
     pub end: TimeOfDay,
@@ -153,7 +139,7 @@ pub struct WorkInterval {
 pub struct DayEntry {
     pub day_id: DayId,
     pub label: DayLabel,
-    pub intervals: Vec<WorkInterval>,
+    pub interval: Option<WorkInterval>,
     pub break_minutes: BreakMinutes,
     pub enabled: bool,
 }
@@ -175,7 +161,7 @@ pub struct WeekSheet {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeekSummary {
-    pub total_minutes: WorkedMinutes,
+    pub total_minutes: u16,
     pub worked_days: u8,
 }
 
@@ -190,8 +176,8 @@ pub enum ThemePreference {
 pub struct AppSettings {
     pub overtime_threshold: OvertimeThresholdMinutes,
     pub theme: ThemePreference,
-    pub default_work_interval: DefaultWorkInterval,
-    pub default_break_minutes: DefaultBreakMinutes,
+    pub default_work_interval: WorkInterval,
+    pub default_break_minutes: BreakMinutes,
     pub configured_days: Vec<ConfiguredDay>,
     pub active_week_id: Option<WeekId>,
 }

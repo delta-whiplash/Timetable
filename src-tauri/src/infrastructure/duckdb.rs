@@ -4,15 +4,13 @@ use chrono::Utc;
 use duckdb::{params, Connection};
 
 use crate::{
-    application::ports::{AnalyticsRepository, SettingsRepository, WeekRepository},
     application::dto::{DayOfWeekStats, MonthlyStatsView, WeeklyTrendPoint},
     domain::{
         errors::StorageError,
         logic::{default_settings, minutes_to_label},
         types::{
-            AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
-            DefaultWorkInterval, OvertimeThresholdMinutes, ThemePreference,
-            TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
+            AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes,
+            ThemePreference, TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
         },
     },
 };
@@ -25,12 +23,23 @@ fn open_connection(path: &PathBuf) -> Result<Connection, StorageError> {
     Connection::open(path).map_err(|_| StorageError::StorageUnavailable)
 }
 
+fn parse_interval(start_minutes: Option<u16>, end_minutes: Option<u16>) -> Option<WorkInterval> {
+    match (start_minutes, end_minutes) {
+        (Some(start), Some(end)) => Some(WorkInterval {
+            start: TimeOfDay(start),
+            end: TimeOfDay(end),
+        }),
+        _ => None,
+    }
+}
+
+/// Stockage DuckDB : semaines, jours et paramètres de l'application.
 #[derive(Clone)]
-pub struct DuckDbWeekRepository {
+pub struct DuckDb {
     database_path: PathBuf,
 }
 
-impl DuckDbWeekRepository {
+impl DuckDb {
     pub fn new(database_path: PathBuf) -> Self {
         Self { database_path }
     }
@@ -49,16 +58,27 @@ impl DuckDbWeekRepository {
         let week_start: String = map_storage_error(row.get(1))?;
         let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
 
-        let mut day_statement = map_storage_error(connection.prepare(
+        let entries = self.load_entries(connection, &stored_week_id)?;
+
+        Ok(Some(WeekSheet {
+            week_id: WeekId(stored_week_id),
+            week_start: WeekStartDate::parse(&week_start).map_err(|_| StorageError::SerializationFailed)?,
+            entries,
+            overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+        }))
+    }
+
+    fn load_entries(&self, connection: &Connection, week_id: &str) -> Result<Vec<DayEntry>, StorageError> {
+        let mut statement = map_storage_error(connection.prepare(
             "SELECT day_id, label, enabled, start_minutes, end_minutes, break_minutes
              FROM day_entries
              WHERE week_id = ?1
              ORDER BY day_id ASC",
         ))?;
-        let mut day_rows = map_storage_error(day_statement.query(params![stored_week_id.clone()]))?;
+        let mut rows = map_storage_error(statement.query(params![week_id]))?;
 
         let mut entries = Vec::new();
-        while let Some(day_row) = map_storage_error(day_rows.next())? {
+        while let Some(day_row) = map_storage_error(rows.next())? {
             let day_id: u8 = map_storage_error(day_row.get(0))?;
             let label: String = map_storage_error(day_row.get(1))?;
             let enabled: bool = map_storage_error(day_row.get(2))?;
@@ -68,37 +88,21 @@ impl DuckDbWeekRepository {
 
             // Les horaires sont préservés même si le jour est désactivé
             // pour pouvoir les restaurer si l'utilisateur réactive le jour
-            let intervals = match (start_minutes, end_minutes) {
-                (Some(start), Some(end)) => vec![WorkInterval {
-                    start: TimeOfDay(start),
-                    end: TimeOfDay(end),
-                }],
-                _ => Vec::new(),
-            };
-
             entries.push(DayEntry {
                 day_id: DayId(day_id),
                 label: DayLabel(label),
-                intervals,
+                interval: parse_interval(start_minutes, end_minutes),
                 break_minutes: BreakMinutes(break_minutes),
                 enabled,
             });
         }
 
-        Ok(Some(WeekSheet {
-            week_id: WeekId(stored_week_id),
-            week_start: WeekStartDate::parse(&week_start).map_err(|_| StorageError::SerializationFailed)?,
-            entries,
-            overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
-        }))
+        Ok(entries)
     }
-}
 
-impl WeekRepository for DuckDbWeekRepository {
-    fn migrate(&self) -> Result<(), StorageError> {
+    pub fn migrate(&self) -> Result<(), StorageError> {
         let connection = open_connection(&self.database_path)?;
 
-        // Create weeks table
         map_storage_error(connection.execute(
             "CREATE TABLE IF NOT EXISTS weeks (
                 id TEXT PRIMARY KEY,
@@ -109,7 +113,6 @@ impl WeekRepository for DuckDbWeekRepository {
             [],
         ))?;
 
-        // Create day_entries table
         map_storage_error(connection.execute(
             "CREATE TABLE IF NOT EXISTS day_entries (
                 week_id TEXT NOT NULL,
@@ -124,7 +127,6 @@ impl WeekRepository for DuckDbWeekRepository {
             [],
         ))?;
 
-        // Create settings table
         map_storage_error(connection.execute(
             "CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY,
@@ -143,12 +145,12 @@ impl WeekRepository for DuckDbWeekRepository {
         Ok(())
     }
 
-    fn get_week_by_id(&self, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
+    pub fn get_week_by_id(&self, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
         self.load_week(&connection, week_id)
     }
 
-    fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
+    pub fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
         let mut statement = map_storage_error(connection.prepare(
             "SELECT id FROM weeks WHERE week_start = ?1",
@@ -161,7 +163,7 @@ impl WeekRepository for DuckDbWeekRepository {
         self.load_week(&connection, &WeekId(week_id))
     }
 
-    fn save_week(&self, week: &WeekSheet) -> Result<(), StorageError> {
+    pub fn save_week(&self, week: &WeekSheet) -> Result<(), StorageError> {
         let mut connection = open_connection(&self.database_path)?;
         let transaction = map_storage_error(connection.transaction())?;
 
@@ -184,8 +186,7 @@ impl WeekRepository for DuckDbWeekRepository {
 
         for entry in &week.entries {
             let (start_minutes, end_minutes) = entry
-                .intervals
-                .first()
+                .interval
                 .map(|interval| (Some(interval.start.0), Some(interval.end.0)))
                 .unwrap_or((None, None));
 
@@ -208,10 +209,9 @@ impl WeekRepository for DuckDbWeekRepository {
         Ok(())
     }
 
-    fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError> {
+    pub fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
 
-        // Single JOIN query instead of N+1
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 w.id, w.week_start, w.overtime_threshold_minutes,
@@ -223,71 +223,44 @@ impl WeekRepository for DuckDbWeekRepository {
 
         let mut rows = map_storage_error(statement.query([]))?;
 
-        // Group entries by week_id
-        use std::collections::HashMap;
-        let mut weeks_map: HashMap<String, (WeekId, WeekStartDate, OvertimeThresholdMinutes, Vec<DayEntry>)> = HashMap::new();
-
+        let mut weeks: Vec<WeekSheet> = Vec::new();
         while let Some(row) = map_storage_error(rows.next())? {
             let week_id_str: String = map_storage_error(row.get(0))?;
-            let week_start_str: String = map_storage_error(row.get(1))?;
-            let overtime_threshold: u16 = map_storage_error(row.get(2))?;
 
-            // Get or create week entry in map
-            if !weeks_map.contains_key(&week_id_str) {
-                let week_start = WeekStartDate::parse(&week_start_str)
-                    .map_err(|_| StorageError::SerializationFailed)?;
-                weeks_map.insert(
-                    week_id_str.clone(),
-                    (WeekId(week_id_str.clone()), week_start, OvertimeThresholdMinutes(overtime_threshold), Vec::new())
-                );
+            if weeks.last().map(|week| week.week_id.0.as_str()) != Some(week_id_str.as_str()) {
+                let week_start_str: String = map_storage_error(row.get(1))?;
+                let overtime_threshold: u16 = map_storage_error(row.get(2))?;
+                weeks.push(WeekSheet {
+                    week_id: WeekId(week_id_str.clone()),
+                    week_start: WeekStartDate::parse(&week_start_str)
+                        .map_err(|_| StorageError::SerializationFailed)?,
+                    entries: Vec::new(),
+                    overtime_threshold: OvertimeThresholdMinutes(overtime_threshold),
+                });
             }
 
-            // Add entry if present (LEFT JOIN can have NULL for day columns)
-            let day_id: Option<u8> = row.get(3).ok();
-            if let Some(day_id) = day_id {
+            // LEFT JOIN can have NULL day columns for a week without entries
+            if let Ok(Some(day_id)) = row.get::<_, Option<u8>>(3) {
                 let label: String = map_storage_error(row.get(4))?;
                 let enabled: bool = map_storage_error(row.get(5))?;
                 let start_minutes: Option<u16> = map_storage_error(row.get(6))?;
                 let end_minutes: Option<u16> = map_storage_error(row.get(7))?;
                 let break_minutes: u16 = map_storage_error(row.get(8))?;
 
-                let intervals = match (start_minutes, end_minutes) {
-                    (Some(start), Some(end)) => vec![WorkInterval {
-                        start: TimeOfDay(start),
-                        end: TimeOfDay(end),
-                    }],
-                    _ => Vec::new(),
-                };
-
-                let entry = DayEntry {
+                weeks.last_mut().expect("week pushed above").entries.push(DayEntry {
                     day_id: DayId(day_id),
                     label: DayLabel(label),
-                    intervals,
+                    interval: parse_interval(start_minutes, end_minutes),
                     break_minutes: BreakMinutes(break_minutes),
                     enabled,
-                };
-
-                weeks_map.get_mut(&week_id_str).unwrap().3.push(entry);
+                });
             }
         }
-
-        // Convert map to Vec<WeekSheet>, sorted by week_start DESC
-        let mut weeks: Vec<WeekSheet> = weeks_map.into_values()
-            .map(|(week_id, week_start, overtime_threshold, entries)| WeekSheet {
-                week_id,
-                week_start,
-                entries,
-                overtime_threshold,
-            })
-            .collect();
-
-        // Sort by week_start descending (since HashMap doesn preserve order)
-        weeks.sort_by(|a, b| b.week_start.as_string().cmp(&a.week_start.as_string()));
 
         Ok(weeks)
     }
 
-    fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError> {
+    pub fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError> {
         let connection = open_connection(&self.database_path)?;
         map_storage_error(connection.execute(
             "DELETE FROM day_entries WHERE week_id = ?1",
@@ -297,7 +270,7 @@ impl WeekRepository for DuckDbWeekRepository {
         Ok(())
     }
 
-    fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError> {
+    pub fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError> {
         let connection = open_connection(&self.database_path)?;
         let mut statement = map_storage_error(connection.prepare(
             "SELECT COALESCE(SUM(
@@ -320,14 +293,98 @@ impl WeekRepository for DuckDbWeekRepository {
             statement.query_row(params![up_to_week_start.as_string()], |row| row.get(0));
         map_storage_error(balance)
     }
-}
 
-impl AnalyticsRepository for DuckDbWeekRepository {
-    fn get_day_of_week_stats(&self) -> Result<Vec<DayOfWeekStats>, StorageError> {
+    pub fn ensure_default_settings(&self) -> Result<(), StorageError> {
+        let settings = default_settings();
+        let configured_days_json =
+            serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
+
+        let connection = open_connection(&self.database_path)?;
+        map_storage_error(connection.execute(
+            "INSERT INTO settings
+             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
+             SELECT 1, ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7
+             WHERE NOT EXISTS (SELECT 1 FROM settings WHERE id = 1)",
+            params![
+                settings.overtime_threshold.0,
+                theme_to_string(settings.theme),
+                configured_days_json,
+                settings.default_work_interval.start.to_hhmm(),
+                settings.default_work_interval.end.to_hhmm(),
+                TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
+                Utc::now().to_rfc3339()
+            ],
+        ))?;
+        Ok(())
+    }
+
+    pub fn load_settings(&self) -> Result<AppSettings, StorageError> {
+        let connection = open_connection(&self.database_path)?;
+        let mut statement = map_storage_error(connection.prepare(
+            "SELECT overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break
+             FROM settings
+             WHERE id = 1",
+        ))?;
+        let mut rows = map_storage_error(statement.query([]))?;
+        let Some(row) = map_storage_error(rows.next())? else {
+            return Err(StorageError::EntityNotFound);
+        };
+
+        let overtime_threshold_minutes: u16 = map_storage_error(row.get(0))?;
+        let theme: String = map_storage_error(row.get(1))?;
+        let configured_days_json: String = map_storage_error(row.get(2))?;
+        let active_week_id: Option<String> = map_storage_error(row.get(3))?;
+        let default_start: String = map_storage_error(row.get(4))?;
+        let default_end: String = map_storage_error(row.get(5))?;
+        let default_break: String = map_storage_error(row.get(6))?;
+        let configured_days = serde_json::from_str(&configured_days_json)
+            .map_err(|_| StorageError::SerializationFailed)?;
+
+        Ok(AppSettings {
+            overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+            theme: match theme.as_str() {
+                "light" => ThemePreference::Light,
+                _ => ThemePreference::Dark,
+            },
+            default_work_interval: WorkInterval {
+                start: TimeOfDay::parse(&default_start).map_err(|_| StorageError::SerializationFailed)?,
+                end: TimeOfDay::parse(&default_end).map_err(|_| StorageError::SerializationFailed)?,
+            },
+            default_break_minutes: BreakMinutes::parse(&default_break)
+                .map_err(|_| StorageError::SerializationFailed)?,
+            configured_days,
+            active_week_id: active_week_id.map(WeekId),
+        })
+    }
+
+    pub fn save_settings(&self, settings: &AppSettings) -> Result<(), StorageError> {
+        let connection = open_connection(&self.database_path)?;
+        let configured_days_json =
+            serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
+        map_storage_error(connection.execute(
+            "INSERT INTO settings
+             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (id) DO UPDATE SET
+               overtime_threshold_minutes = ?1, theme = ?2, configured_days_json = ?3, active_week_id = ?4,
+               default_start = ?5, default_end = ?6, default_break = ?7, updated_at = ?8",
+            params![
+                settings.overtime_threshold.0,
+                theme_to_string(settings.theme),
+                configured_days_json,
+                settings.active_week_id.as_ref().map(|week_id| week_id.0.clone()),
+                settings.default_work_interval.start.to_hhmm(),
+                settings.default_work_interval.end.to_hhmm(),
+                TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
+                Utc::now().to_rfc3339()
+            ],
+        ))?;
+        Ok(())
+    }
+
+    pub fn get_day_of_week_stats(&self) -> Result<Vec<DayOfWeekStats>, StorageError> {
         let connection = open_connection(&self.database_path)?;
 
-        // Requête pour calculer les statistiques par jour de la semaine
-        // day_id correspond à l'index du jour (0=Lundi, 1=Mardi, etc.)
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 de.day_id,
@@ -350,7 +407,6 @@ impl AnalyticsRepository for DuckDbWeekRepository {
         let mut rows = map_storage_error(statement.query([]))?;
         let mut stats = Vec::new();
 
-        // Noms des jours de la semaine en français
         let day_names = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 
         while let Some(row) = map_storage_error(rows.next())? {
@@ -359,10 +415,8 @@ impl AnalyticsRepository for DuckDbWeekRepository {
             let entry_count: i64 = map_storage_error(row.get(2))?;
             let total_minutes: i64 = map_storage_error(row.get(3))?;
 
-            let entry_count = entry_count.max(0) as u32;
-            let total_minutes = total_minutes.max(0) as u32;
             let average_minutes = if entry_count > 0 {
-                total_minutes / entry_count
+                (total_minutes / entry_count).max(0) as u32
             } else {
                 0
             };
@@ -376,10 +430,9 @@ impl AnalyticsRepository for DuckDbWeekRepository {
         Ok(stats)
     }
 
-    fn get_weekly_trends(&self) -> Result<Vec<WeeklyTrendPoint>, StorageError> {
+    pub fn get_weekly_trends(&self) -> Result<Vec<WeeklyTrendPoint>, StorageError> {
         let connection = open_connection(&self.database_path)?;
 
-        // Requête pour obtenir les tendances des 12 dernières semaines
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 w.week_start,
@@ -417,10 +470,9 @@ impl AnalyticsRepository for DuckDbWeekRepository {
         Ok(trends)
     }
 
-    fn get_monthly_stats(&self) -> Result<Vec<MonthlyStatsView>, StorageError> {
+    pub fn get_monthly_stats(&self) -> Result<Vec<MonthlyStatsView>, StorageError> {
         let connection = open_connection(&self.database_path)?;
 
-        // Requête pour agréger les statistiques par mois
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 SUBSTR(w.week_start, 1, 7) as month,
@@ -448,10 +500,9 @@ impl AnalyticsRepository for DuckDbWeekRepository {
             let weeks_count: i64 = map_storage_error(row.get(1))?;
             let total_minutes: i64 = map_storage_error(row.get(2))?;
 
-            let weeks_count = weeks_count.max(0) as u32;
             let total_minutes = total_minutes.max(0) as u32;
             let weekly_average_minutes = if weeks_count > 0 {
-                total_minutes / weeks_count
+                total_minutes / weeks_count as u32
             } else {
                 0
             };
@@ -469,106 +520,6 @@ impl AnalyticsRepository for DuckDbWeekRepository {
     }
 }
 
-#[derive(Clone)]
-pub struct DuckDbSettingsRepository {
-    database_path: PathBuf,
-}
-
-impl DuckDbSettingsRepository {
-    pub fn new(database_path: PathBuf) -> Self {
-        Self { database_path }
-    }
-}
-
-impl SettingsRepository for DuckDbSettingsRepository {
-    fn ensure_default_settings(&self) -> Result<(), StorageError> {
-        let settings = default_settings();
-        let configured_days_json =
-            serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
-
-        let connection = open_connection(&self.database_path)?;
-        map_storage_error(connection.execute(
-            "INSERT INTO settings
-             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
-             SELECT 1, ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7
-             WHERE NOT EXISTS (SELECT 1 FROM settings WHERE id = 1)",
-            params![
-                settings.overtime_threshold.0,
-                theme_to_string(settings.theme),
-                configured_days_json,
-                settings.default_work_interval.start.to_hhmm(),
-                settings.default_work_interval.end.to_hhmm(),
-                TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
-                Utc::now().to_rfc3339()
-            ],
-        ))?;
-        Ok(())
-    }
-
-    fn load_settings(&self) -> Result<AppSettings, StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        let mut statement = map_storage_error(connection.prepare(
-            "SELECT overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break
-             FROM settings
-             WHERE id = 1",
-        ))?;
-        let mut rows = map_storage_error(statement.query([]))?;
-        let Some(row) = map_storage_error(rows.next())? else {
-            return Err(StorageError::EntityNotFound);
-        };
-
-        let overtime_threshold_minutes: u16 = map_storage_error(row.get(0))?;
-        let theme: String = map_storage_error(row.get(1))?;
-        let configured_days_json: String = map_storage_error(row.get(2))?;
-        let active_week_id: Option<String> = map_storage_error(row.get(3))?;
-        let default_start: String = map_storage_error(row.get(4))?;
-        let default_end: String = map_storage_error(row.get(5))?;
-        let default_break: String = map_storage_error(row.get(6))?;
-        let configured_days = serde_json::from_str(&configured_days_json)
-            .map_err(|_| StorageError::SerializationFailed)?;
-
-        Ok(AppSettings {
-            overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
-            theme: match theme.as_str() {
-                "light" => ThemePreference::Light,
-                _ => ThemePreference::Dark,
-            },
-            default_work_interval: DefaultWorkInterval {
-                start: TimeOfDay::parse(&default_start).map_err(|_| StorageError::SerializationFailed)?,
-                end: TimeOfDay::parse(&default_end).map_err(|_| StorageError::SerializationFailed)?,
-            },
-            default_break_minutes: DefaultBreakMinutes(BreakMinutes::parse(&default_break).map_err(|_| StorageError::SerializationFailed)?.0),
-            configured_days,
-            active_week_id: active_week_id.map(WeekId),
-        })
-    }
-
-    fn save_settings(&self, settings: &AppSettings) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        let configured_days_json =
-            serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
-        map_storage_error(connection.execute(
-            "INSERT INTO settings
-             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT (id) DO UPDATE SET
-               overtime_threshold_minutes = ?1, theme = ?2, configured_days_json = ?3, active_week_id = ?4,
-               default_start = ?5, default_end = ?6, default_break = ?7, updated_at = ?8",
-            params![
-                settings.overtime_threshold.0,
-                theme_to_string(settings.theme),
-                configured_days_json,
-                settings.active_week_id.as_ref().map(|week_id| week_id.0.clone()),
-                settings.default_work_interval.start.to_hhmm(),
-                settings.default_work_interval.end.to_hhmm(),
-                TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
-                Utc::now().to_rfc3339()
-            ],
-        ))?;
-        Ok(())
-    }
-}
-
 fn theme_to_string(theme: ThemePreference) -> &'static str {
     match theme {
         ThemePreference::Light => "light",
@@ -581,33 +532,31 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::{
-        application::ports::{SettingsRepository, WeekRepository},
         domain::{
             logic::{default_entries, summarize_week},
-            types::{default_configured_days, OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
+            types::{default_configured_days, OvertimeThresholdMinutes, WeekSheet, WeekStartDate},
         },
-        infrastructure::duckdb::{DuckDbSettingsRepository, DuckDbWeekRepository},
+        infrastructure::duckdb::DuckDb,
     };
 
     #[test]
     fn persists_and_loads_week() {
         let temp_dir = tempdir().expect("temp dir");
         let db_path = temp_dir.path().join("integration.duckdb");
-        let week_repository = DuckDbWeekRepository::new(db_path.clone());
-        let settings_repository = DuckDbSettingsRepository::new(db_path);
+        let store = DuckDb::new(db_path);
 
-        week_repository.migrate().expect("migrations");
-        settings_repository.ensure_default_settings().expect("default settings");
+        store.migrate().expect("migrations");
+        store.ensure_default_settings().expect("default settings");
 
         let week = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_configured_days()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
 
-        week_repository.save_week(&week).expect("save");
-        let loaded = week_repository
+        store.save_week(&week).expect("save");
+        let loaded = store
             .get_week_by_id(&week.week_id)
             .expect("load")
             .expect("week should exist");
@@ -619,12 +568,11 @@ mod tests {
     #[test]
     fn cumulative_balance_no_weeks() {
         let temp_dir = tempdir().expect("temp dir");
-        let db_path = temp_dir.path().join("balance_test.duckdb");
-        let week_repository = DuckDbWeekRepository::new(db_path);
+        let store = DuckDb::new(temp_dir.path().join("balance_test.duckdb"));
 
-        week_repository.migrate().expect("migrations");
+        store.migrate().expect("migrations");
 
-        let balance = week_repository
+        let balance = store
             .get_cumulative_balance(&WeekStartDate::today())
             .expect("balance query");
 
@@ -634,63 +582,59 @@ mod tests {
     #[test]
     fn cumulative_balance_single_week_positive() {
         let temp_dir = tempdir().expect("temp dir");
-        let db_path = temp_dir.path().join("balance_test.duckdb");
-        let week_repository = DuckDbWeekRepository::new(db_path.clone());
-        let settings_repository = DuckDbSettingsRepository::new(db_path);
+        let store = DuckDb::new(temp_dir.path().join("balance_test.duckdb"));
 
-        week_repository.migrate().expect("migrations");
-        settings_repository.ensure_default_settings().expect("default settings");
+        store.migrate().expect("migrations");
+        store.ensure_default_settings().expect("default settings");
 
         let week = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_configured_days()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
 
-        week_repository.save_week(&week).expect("save");
+        store.save_week(&week).expect("save");
 
-        let balance = week_repository
+        let balance = store
             .get_cumulative_balance(&week.week_start)
             .expect("balance query");
 
         let summary = summarize_week(&week).expect("summary");
-        assert_eq!(balance, summary.total_minutes.0 as i32 - 2100);
+        assert_eq!(balance, i32::from(summary.total_minutes) - 2100);
     }
 
     #[test]
     fn cumulative_balance_multiple_weeks() {
         let temp_dir = tempdir().expect("temp dir");
-        let db_path = temp_dir.path().join("balance_test.duckdb");
-        let week_repository = DuckDbWeekRepository::new(db_path.clone());
-        let settings_repository = DuckDbSettingsRepository::new(db_path);
+        let store = DuckDb::new(temp_dir.path().join("balance_test.duckdb"));
 
-        week_repository.migrate().expect("migrations");
-        settings_repository.ensure_default_settings().expect("default settings");
+        store.migrate().expect("migrations");
+        store.ensure_default_settings().expect("default settings");
 
         let week1 = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_configured_days()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
-        week_repository.save_week(&week1).expect("save week1");
+        store.save_week(&week1).expect("save week1");
 
         let week2 = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::parse("2024-01-15").expect("parse date"),
             entries: default_entries(&default_configured_days()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
-        week_repository.save_week(&week2).expect("save week2");
+        store.save_week(&week2).expect("save week2");
 
-        let balance = week_repository
+        let balance = store
             .get_cumulative_balance(&WeekStartDate::today())
             .expect("balance query");
 
         let summary1 = summarize_week(&week1).expect("summary1");
         let summary2 = summarize_week(&week2).expect("summary2");
-        let expected = (summary1.total_minutes.0 as i32 - 2100) + (summary2.total_minutes.0 as i32 - 2100);
+        let expected = (i32::from(summary1.total_minutes) - 2100) + (i32::from(summary2.total_minutes) - 2100);
         assert_eq!(balance, expected);
     }
 }
