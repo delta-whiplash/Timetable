@@ -26,17 +26,6 @@
     { id: "analytics" as const, label: "Analytiques", icon: "📊" },
     { id: "settings" as const, label: "Configuration", icon: "⚙️" },
   ];
-
-  function getBalanceBarStyle(balance: number, threshold: number): { width: string; left?: string; right?: string; background: string } {
-    if (threshold <= 0) return { width: "0%", background: "transparent" };
-    const percent = Math.min((Math.abs(balance) / threshold) * 50, 50);
-    if (balance > 0) {
-      return { width: `${percent}%`, left: "50%", background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)" };
-    } else if (balance < 0) {
-      return { width: `${percent}%`, right: "50%", background: "linear-gradient(90deg, #ef4444 0%, #f97316 100%)" };
-    }
-    return { width: "0%", background: "transparent" };
-  }
 </script>
 
 <aside class="sidebar">

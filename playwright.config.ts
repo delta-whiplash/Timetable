@@ -27,7 +27,15 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // PLAYWRIGHT_EXECUTABLE / PLAYWRIGHT_CHANNEL let a machine reuse an
+      // existing browser instead of downloading one (e.g. system Edge).
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
+        ...(process.env.PLAYWRIGHT_EXECUTABLE
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_EXECUTABLE } }
+          : {}),
+      },
     },
   ],
 

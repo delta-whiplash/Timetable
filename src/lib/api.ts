@@ -1,9 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalyticsDataView,
-  AppStatusView,
   BootstrapState,
-  DataExport,
   DeleteWeekInput,
   SaveSettingsInput,
   SaveWeekInput,
@@ -17,10 +15,6 @@ import type {
 
 export function loadBootstrap(): Promise<BootstrapState> {
   return invoke("load_bootstrap");
-}
-
-export function getActiveWeek(): Promise<WeekSheetView> {
-  return invoke("get_active_week");
 }
 
 export function saveWeek(input: SaveWeekInput): Promise<WeekSheetView> {
@@ -49,18 +43,6 @@ export function saveSettings(input: SaveSettingsInput): Promise<SettingsView> {
 
 export function setTheme(input: ThemeInput): Promise<ThemeView> {
   return invoke("set_theme", { input });
-}
-
-export function getAppStatus(): Promise<AppStatusView> {
-  return invoke("get_app_status");
-}
-
-export function exportData(): Promise<string> {
-  return invoke("export_data");
-}
-
-export function importData(jsonData: string): Promise<BootstrapState> {
-  return invoke("import_data", { jsonData });
 }
 
 export function getAnalytics(): Promise<AnalyticsDataView> {

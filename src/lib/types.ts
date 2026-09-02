@@ -11,24 +11,8 @@ export interface DayEntryView {
   totalLabel: string;
 }
 
-export interface DaySummaryView {
-  dayId: number;
-  label: string;
-  workedMinutes: number;
-  workedLabel: string;
-}
-
 export interface WeekSummaryView {
-  totalMinutes: number;
   totalLabel: string;
-  overtimeMinutes: number;
-  overtimeLabel: string;
-  averageMinutes: number;
-  averageLabel: string;
-  workedDays: number;
-  longestDay: DaySummaryView | null;
-  shortestDay: DaySummaryView | null;
-  quickRead: string;
   percentage: number;
   cumulativeBalanceMinutes: number;
   cumulativeBalanceLabel: string;
@@ -73,20 +57,7 @@ export interface ThemeView {
 }
 
 export interface BootstrapState {
-  theme: ThemePreference;
-  overtimeThresholdMinutes: number;
   activeWeek: WeekSheetView;
-  configChecksum: string;
-  version: string;
-}
-
-export interface AppStatusView {
-  version: string;
-  configChecksum: string;
-  storageStatus: "healthy" | "degraded";
-  latestMigrationStatus: string;
-  activeWeekId: string | null;
-  latestDiagnosticSnapshotId: string | null;
 }
 
 export interface SaveWeekDayEntryInput {
@@ -129,42 +100,22 @@ export interface CommandError {
   code: string;
   message: string;
   correlationId: string;
-  retryable: boolean;
-}
-
-export interface DataExport {
-  version: string;
-  exportedAt: string;
-  settings: SettingsView;
-  weeks: WeekSheetView[];
 }
 
 // Analytics types
 export interface DayOfWeekStats {
-  dayIndex: number;
   dayName: string;
-  entryCount: number;
   averageMinutes: number;
-  averageLabel: string;
-  totalMinutes: number;
-  totalLabel: string;
 }
 
 export interface WeeklyTrendPoint {
   weekStart: string;
   totalMinutes: number;
-  totalLabel: string;
-  workedDays: number;
-  overtimeMinutes: number;
-  overtimeLabel: string;
 }
 
 export interface MonthlyStatsView {
   month: string;
-  weeksCount: number;
-  totalMinutes: number;
   totalLabel: string;
-  weeklyAverageMinutes: number;
   weeklyAverageLabel: string;
 }
 

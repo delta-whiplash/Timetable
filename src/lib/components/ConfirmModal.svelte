@@ -23,20 +23,6 @@
     }
   }
 
-  function handleBackdropKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleCancel();
-    }
-  }
-
-  function handleModalKeydown(event: KeyboardEvent) {
-    // Laissez le gestionnaire global gérer Escape
-    if (event.key === "Enter" || event.key === " ") {
-      event.stopPropagation();
-    }
-  }
-
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       handleCancel();
@@ -49,8 +35,9 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if open}
-  <div class="modal-backdrop" on:click={handleBackdropClick} on:keydown={handleBackdropKeydown} role="button" aria-label="Fermer" tabindex="-1">
-    <div class="modal" class:modal--open={open} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="0" on:click={(e) => e.stopPropagation()} on:keydown={handleModalKeydown}>
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" on:click={handleBackdropClick} aria-label="Fermer">
+    <div class="modal" class:modal--open={open} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="0" on:click={(e) => e.stopPropagation()}>
       <div class="modal-header">
         <h2 id="modal-title">{title}</h2>
       </div>

@@ -12,7 +12,6 @@ import {
   createOrSwitchWeek,
   deleteWeek,
   getAnalytics,
-  getAppStatus,
   listWeeks,
   loadBootstrap,
   loadSettings,
@@ -25,44 +24,14 @@ import { initialAppState, toCommandError, type AppState } from "./state";
 function createAppStore() {
   const { subscribe, update } = writable<AppState>(initialAppState());
 
-  // Déduplication pour éviter refreshes concurrents
-  let refreshInProgress = false;
-  let pendingRefresh = false;
-
   async function refreshSecondaryData() {
-    if (refreshInProgress) {
-      pendingRefresh = true;
-      return;
-    }
-    refreshInProgress = true;
-    pendingRefresh = false;
-    try {
-      const [settings, history, status] = await Promise.all([loadSettings(), listWeeks(), getAppStatus()]);
-      update((state) => ({ ...state, settings, history, status }));
-      if (pendingRefresh) {
-        await refreshSecondaryData();
-      }
-    } finally {
-      refreshInProgress = false;
-    }
+    const [settings, history] = await Promise.all([loadSettings(), listWeeks()]);
+    update((state) => ({ ...state, settings, history }));
   }
 
   async function refreshHistoryOnly() {
-    if (refreshInProgress) {
-      pendingRefresh = true;
-      return;
-    }
-    refreshInProgress = true;
-    pendingRefresh = false;
-    try {
-      const history = await listWeeks();
-      update((state) => ({ ...state, history }));
-    } finally {
-      refreshInProgress = false;
-      if (pendingRefresh) {
-        await refreshSecondaryData();
-      }
-    }
+    const history = await listWeeks();
+    update((state) => ({ ...state, history }));
   }
 
   async function bootstrap() {
@@ -74,8 +43,6 @@ function createAppStore() {
         ...state,
         loading: false,
         bootstrapped: true,
-        version: bootstrapState.version,
-        configChecksum: bootstrapState.configChecksum,
         activeWeek: bootstrapState.activeWeek
       }));
       await refreshSecondaryData();
@@ -117,7 +84,6 @@ function createAppStore() {
     try {
       const settings = await saveSettings(input);
       update((state) => ({ ...state, settings, savingSettings: false }));
-      await refreshSecondaryData();
     } catch (error) {
       update((state) => ({ ...state, savingSettings: false, error: toCommandError(error) }));
     }

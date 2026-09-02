@@ -1,6 +1,5 @@
 import type {
   AnalyticsDataView,
-  AppStatusView,
   CommandError,
   SettingsView,
   WeekListItem,
@@ -14,31 +13,27 @@ export interface AppState {
   switchingWeek: boolean;
   savingSettings: boolean;
   error: CommandError | null;
-  version: string;
-  configChecksum: string;
   activeWeek: WeekSheetView | null;
   settings: SettingsView | null;
   history: WeekListItem[];
-  status: AppStatusView | null;
   analytics: AnalyticsDataView | null;
 }
 
+const INITIAL_STATE: AppState = {
+  bootstrapped: false,
+  loading: true,
+  savingWeek: false,
+  switchingWeek: false,
+  savingSettings: false,
+  error: null,
+  activeWeek: null,
+  settings: null,
+  history: [],
+  analytics: null
+};
+
 export function initialAppState(): AppState {
-  return {
-    bootstrapped: false,
-    loading: true,
-    savingWeek: false,
-    switchingWeek: false,
-    savingSettings: false,
-    error: null,
-    version: "",
-    configChecksum: "",
-    activeWeek: null,
-    settings: null,
-    history: [],
-    status: null,
-    analytics: null
-  };
+  return INITIAL_STATE;
 }
 
 export function toCommandError(error: unknown): CommandError {
@@ -46,15 +41,13 @@ export function toCommandError(error: unknown): CommandError {
     return {
       code: "frontend.invoke_failed",
       message: String((error as { message: unknown }).message),
-      correlationId: crypto.randomUUID(),
-      retryable: false
+      correlationId: crypto.randomUUID()
     };
   }
 
   return {
     code: "frontend.unknown",
     message: "Une erreur inattendue est survenue.",
-    correlationId: crypto.randomUUID(),
-    retryable: false
+    correlationId: crypto.randomUUID()
   };
 }

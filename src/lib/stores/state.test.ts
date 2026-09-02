@@ -16,7 +16,6 @@ describe("state helpers", () => {
 
     expect(error.code).toBe("frontend.invoke_failed");
     expect(error.message).toBe("backend unavailable");
-    expect(error.retryable).toBe(false);
     expect(error.correlationId).toHaveLength(36);
   });
 });

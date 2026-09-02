@@ -19,8 +19,7 @@
     return false;
   }
 
-  function getMondayOfWeek(dateStr: string): Date {
-    const date = new Date(dateStr);
+  function mondayOf(date: Date): Date {
     const day = date.getDay();
     const diff = date.getDate() - day + (day === 0 ? -6 : 1);
     const monday = new Date(date.setDate(diff));
@@ -37,16 +36,11 @@
   }
 
   function getCurrentWeekMonday(): string {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-    return formatDate(monday);
+    return formatDate(mondayOf(new Date()));
   }
 
   function formatDisplayRange(weekStart: string): string {
-    const monday = getMondayOfWeek(weekStart);
+    const monday = mondayOf(new Date(weekStart));
     const sunday = new Date(monday);
     sunday.setDate(sunday.getDate() + 6);
 
@@ -58,14 +52,14 @@
 
   function previousWeek() {
     if (disabled || isThrottled()) return;
-    const monday = getMondayOfWeek(weekStart);
+    const monday = mondayOf(new Date(weekStart));
     monday.setDate(monday.getDate() - 7);
     dispatch("change", formatDate(monday));
   }
 
   function nextWeek() {
     if (disabled || isThrottled()) return;
-    const monday = getMondayOfWeek(weekStart);
+    const monday = mondayOf(new Date(weekStart));
     monday.setDate(monday.getDate() + 7);
     dispatch("change", formatDate(monday));
   }
@@ -75,20 +69,15 @@
     dispatch("change", getCurrentWeekMonday());
   }
 
-  function dispatchChange() {
-    dispatch("change", weekStart);
-  }
-
   function handleDateInput(event: Event) {
     const value = (event.currentTarget as HTMLInputElement).value;
     if (value) {
       weekStart = value;
-      dispatchChange();
+      dispatch("change", value);
     }
   }
 
   $: displayRange = formatDisplayRange(weekStart);
-  $: pickerValue = weekStart;
   $: isCurrentWeek = weekStart === getCurrentWeekMonday();
 </script>
 
@@ -106,7 +95,7 @@
   <input
     type="date"
     class="week-selector-picker"
-    bind:value={pickerValue}
+    value={weekStart}
     on:change={handleDateInput}
     disabled={disabled}
   />

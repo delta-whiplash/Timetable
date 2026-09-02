@@ -38,11 +38,10 @@
     unsubscribe();
   });
 
-  function saveDraft(entries: DayEntryView[], immediate = false) {
+  function buildSaveInput(entries: DayEntryView[]) {
     const activeWeek = state.activeWeek;
-    if (!activeWeek) return;
-
-    const input = {
+    if (!activeWeek) return null;
+    return {
       weekId: activeWeek.weekId,
       weekStart: activeWeek.weekStart,
       overtimeThresholdMinutes: activeWeek.overtimeThresholdMinutes,
@@ -55,6 +54,11 @@
         breakTime: entry.breakTime
       }))
     };
+  }
+
+  function saveDraft(entries: DayEntryView[], immediate = false) {
+    const input = buildSaveInput(entries);
+    if (!input) return;
 
     if (immediate) {
       // Save immédiat (sans debounce)
@@ -86,27 +90,14 @@
 
   // Force le save immédiat des modifications en attente
   async function flushPendingChanges(): Promise<void> {
-    if (hasPendingChanges && state.activeWeek) {
-      hasPendingChanges = false; // Reset avant save pour éviter race
-      if (saveTimeout) {
-        clearTimeout(saveTimeout);
-        saveTimeout = null;
-      }
-      const input = {
-        weekId: state.activeWeek.weekId,
-        weekStart: state.activeWeek.weekStart,
-        overtimeThresholdMinutes: state.activeWeek.overtimeThresholdMinutes,
-        entries: state.activeWeek.entries.map((entry) => ({
-          dayId: entry.dayId,
-          label: entry.label,
-          enabled: entry.enabled,
-          start: entry.start,
-          end: entry.end,
-          breakTime: entry.breakTime
-        }))
-      };
-      await appStore.persistWeek(input);
+    if (!hasPendingChanges || !state.activeWeek) return;
+    hasPendingChanges = false; // Reset avant save pour éviter race
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
     }
+    const input = buildSaveInput(state.activeWeek.entries);
+    if (input) await appStore.persistWeek(input);
   }
 
   async function handleWeekChange(weekStart: string) {
@@ -151,7 +142,7 @@
       <Sidebar bind:activeTab={activeTab} />
 
       <!-- Main Content -->
-      <main class="main-content">
+      <div class="main-content">
         {#if state.activeWeek}
           <!-- Header with Week Selector -->
           <header class="content-header">
@@ -177,23 +168,6 @@
                 defaultEnd={state.settings?.defaultEnd ?? "18:00"}
                 defaultBreak={state.settings?.defaultBreak ?? "01:00"}
                 on:change={(e) => updateEntry(e.detail)}
-                on:copyPrevious={(e) => {
-                  // Copy from previous day (dayId - 1) to current day
-                  const targetDayId = e.detail;
-                  if (!state.activeWeek) return;
-                  const sourceEntry = state.activeWeek.entries.find(
-                    (entry: DayEntryView) => entry.dayId === targetDayId - 1
-                  );
-                  if (sourceEntry) {
-                    const updated = state.activeWeek.entries.map((entry: DayEntryView) =>
-                      entry.dayId === targetDayId
-                        ? { ...entry, start: sourceEntry.start, end: sourceEntry.end, breakTime: sourceEntry.breakTime }
-                        : entry
-                    );
-                    state = { ...state, activeWeek: { ...state.activeWeek, entries: updated } as WeekSheetView };
-                    saveDraft(updated);
-                  }
-                }}
               />
             </div>
 
@@ -235,7 +209,7 @@
             </div>
           {/if}
         {/if}
-      </main>
+      </div>
     </div>
   </main>
 {/if}

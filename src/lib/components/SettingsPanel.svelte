@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ConfiguredDayView, SaveSettingsInput, SettingsView, ThemePreference } from "$lib/types";
+  import { toMinutes, toHHMM } from "$lib/time";
 
   export let settings: SettingsView;
   export let saving = false;
@@ -9,22 +10,9 @@
   // Overtime threshold in minutes
   let overtimeMinutes = settings.overtimeThresholdMinutes;
   // Default times in minutes
-  let defaultStartMinutes = parseTimeToMinutes(settings.defaultStart);
-  let defaultEndMinutes = parseTimeToMinutes(settings.defaultEnd);
-  let defaultBreakMinutes = parseTimeToMinutes(settings.defaultBreak);
-
-  // Parse "HH:MM" to minutes since midnight
-  function parseTimeToMinutes(time: string): number {
-    const [hours, minutes] = time.split(":").map(Number);
-    return (hours || 0) * 60 + (minutes || 0);
-  }
-
-  // Format minutes to "HH:MM"
-  function formatMinutesToTime(minutes: number): string {
-    const h = Math.floor(Math.abs(minutes) / 60) % 24;
-    const m = Math.abs(minutes) % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
+  let defaultStartMinutes = toMinutes(settings.defaultStart) ?? 0;
+  let defaultEndMinutes = toMinutes(settings.defaultEnd) ?? 0;
+  let defaultBreakMinutes = toMinutes(settings.defaultBreak) ?? 0;
 
   // Format minutes to human-readable "Xh Ymin"
   function formatMinutesToHuman(minutes: number): string {
@@ -42,9 +30,9 @@
   function submit() {
     onSave({
       overtimeThresholdMinutes: overtimeMinutes,
-      defaultStart: formatMinutesToTime(defaultStartMinutes),
-      defaultEnd: formatMinutesToTime(defaultEndMinutes),
-      defaultBreak: formatMinutesToTime(defaultBreakMinutes),
+      defaultStart: toHHMM(defaultStartMinutes),
+      defaultEnd: toHHMM(defaultEndMinutes),
+      defaultBreak: toHHMM(defaultBreakMinutes),
       configuredDays: settings.configuredDays
     });
   }
@@ -93,7 +81,7 @@
       <span>Heure de début par défaut</span>
       <div class="stepper">
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultStart(-30)} aria-label="Diminuer de 30 minutes">−</button>
-        <span class="stepper-value">{formatMinutesToTime(defaultStartMinutes)}</span>
+        <span class="stepper-value">{toHHMM(defaultStartMinutes)}</span>
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultStart(30)} aria-label="Augmenter de 30 minutes">+</button>
       </div>
     </div>
@@ -103,7 +91,7 @@
       <span>Heure de fin par défaut</span>
       <div class="stepper">
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultEnd(-30)} aria-label="Diminuer de 30 minutes">−</button>
-        <span class="stepper-value">{formatMinutesToTime(defaultEndMinutes)}</span>
+        <span class="stepper-value">{toHHMM(defaultEndMinutes)}</span>
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultEnd(30)} aria-label="Augmenter de 30 minutes">+</button>
       </div>
     </div>

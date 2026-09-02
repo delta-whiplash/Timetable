@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { DayEntryView } from "$lib/types";
+  import { toMinutes, toHHMM } from "$lib/time";
 
   export let entry: DayEntryView;
   export let disabled = false;
@@ -9,20 +10,6 @@
   export let defaultBreak = "01:00";
 
   const dispatch = createEventDispatcher();
-
-  // Convert "HH:MM" string to minutes
-  function timeToMinutes(time: string | null): number | null {
-    if (!time) return null;
-    const [hours, minutes] = time.split(":").map(Number);
-    return hours * 60 + minutes;
-  }
-
-  // Convert minutes to "HH:MM" string
-  function minutesToTime(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
-  }
 
   function updateField<K extends keyof DayEntryView>(key: K, value: DayEntryView[K]) {
     dispatch("change", { ...entry, [key]: value });
@@ -46,15 +33,12 @@
   function updateTime(field: "start" | "end" | "breakTime", direction: 1 | -1) {
     const step = field === "breakTime" ? 15 : 30;
     const defaultValue = field === "breakTime" ? defaultBreak : defaultStart;
-    const currentMinutes = timeToMinutes(entry[field]) ?? timeToMinutes(defaultValue) ?? 0;
+    const currentMinutes = toMinutes(entry[field]) ?? toMinutes(defaultValue) ?? 0;
     const newMinutes = Math.max(0, Math.min(24 * 60, currentMinutes + direction * step));
-    updateField(field, minutesToTime(newMinutes));
+    updateField(field, toHHMM(newMinutes));
   }
 
   $: isWeekend = entry.dayId >= 6;
-  $: startMinutes = timeToMinutes(entry.start);
-  $: endMinutes = timeToMinutes(entry.end);
-  $: breakMinutes = timeToMinutes(entry.breakTime) ?? 0;
 </script>
 
 <article
@@ -222,15 +206,6 @@
     color: var(--color-primary);
     font-variant-numeric: tabular-nums;
     transition: transform 0.1s ease;
-  }
-
-  .bento-card-total:global(.changed) {
-    animation: pop 0.2s ease;
-  }
-
-  @keyframes pop {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
   }
 
   /* Body */
