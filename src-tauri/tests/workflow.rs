@@ -4,10 +4,14 @@ use std::sync::Arc;
 
 use timetable_desktop_lib::{
     application::{
-        dto::{SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput},
+        dto::{SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, WeekSelectorInput},
         service::ApplicationService,
     },
-    domain::{logic::default_settings, types::WeekStartDate},
+    domain::{
+        errors::{ApplicationError, StorageError},
+        logic::default_settings,
+        types::WeekStartDate,
+    },
     infrastructure::duckdb::DuckDb,
 };
 use tempfile::tempdir;
@@ -119,4 +123,37 @@ fn saves_week_and_updates_summary() {
 
     assert_eq!(updated_settings.overtime_threshold_minutes, 1800);
     assert_eq!(WeekStartDate::parse("2026-03-12").expect("date").as_string(), "2026-03-09");
+}
+
+#[test]
+fn exports_week_as_xlsx() {
+    let temp_dir = tempdir().expect("temp dir");
+    let store = Arc::new(DuckDb::new(temp_dir.path().join("export.duckdb")));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+
+    let service = ApplicationService::new(store);
+
+    // Crée la semaine du 07/09/2026 avec les entrées par défaut (5 jours actifs)
+    service
+        .create_or_switch_week(WeekSelectorInput {
+            week_start: "2026-09-07".to_string(),
+        })
+        .expect("create week");
+
+    let exported = service
+        .export_week("2026-09-07".to_string())
+        .expect("export week");
+
+    assert_eq!(exported.file_name, "timetable-2026-09-07.xlsx");
+    assert_eq!(&exported.bytes[..4], b"PK\x03\x04", "un xlsx est un zip");
+    assert!(exported.bytes.len() > 500);
+
+    // Semaine inexistante : erreur explicite, pas de fichier fantôme
+    let missing = service.export_week("2020-01-06".to_string());
+    assert!(matches!(
+        missing,
+        Err(ApplicationError::Storage(StorageError::EntityNotFound))
+    ));
 }

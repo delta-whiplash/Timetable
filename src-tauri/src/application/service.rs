@@ -3,13 +3,16 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::{
-    application::dto::{
-        settings_to_view, week_to_view, AnalyticsDataView, BootstrapState, DeleteWeekInput,
-        SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekListItem,
-        WeekSelectorInput, WeekSheetView,
+    application::{
+        dto::{
+            settings_to_view, week_to_view, AnalyticsDataView, BootstrapState, DeleteWeekInput,
+            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekListItem,
+            WeekSelectorInput, WeekSheetView,
+        },
+        export::{build_export_sheet, sheet_to_xlsx},
     },
     domain::{
-        errors::{ApplicationError, ValidationError},
+        errors::{ApplicationError, StorageError, ValidationError},
         logic::{default_entries, minutes_to_label, summarize_week},
         types::{
             AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel,
@@ -19,6 +22,13 @@ use crate::{
     },
     infrastructure::duckdb::DuckDb,
 };
+
+/// Fichier prêt à écrire : nom de sortie (pour la boîte de dialogue) +
+/// contenu bytes (XLSX déjà sérialisé).
+pub struct ExportedFile {
+    pub file_name: String,
+    pub bytes: Vec<u8>,
+}
 
 pub struct ApplicationService {
     store: Arc<DuckDb>,
@@ -157,6 +167,23 @@ impl ApplicationService {
             weekly_trends,
             monthly_stats,
             total_weeks,
+        })
+    }
+
+    pub fn export_week(&self, week_start: String) -> Result<ExportedFile, ApplicationError> {
+        let start = WeekStartDate::parse(&week_start)?;
+        let week = self
+            .store
+            .get_week_by_start(&start)?
+            .ok_or(ApplicationError::Storage(StorageError::EntityNotFound))?;
+
+        let balance = self.store.get_cumulative_balance(&week.week_start)?;
+        let sheet = build_export_sheet(&week, balance).map_err(ApplicationError::from)?;
+        let bytes = sheet_to_xlsx(&sheet);
+
+        Ok(ExportedFile {
+            file_name: format!("timetable-{}.xlsx", week_start),
+            bytes,
         })
     }
 
