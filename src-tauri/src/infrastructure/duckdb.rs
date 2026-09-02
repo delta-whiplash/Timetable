@@ -153,14 +153,25 @@ impl DuckDb {
     pub fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id FROM weeks WHERE week_start = ?1",
+            "SELECT id, week_start, overtime_threshold_minutes FROM weeks WHERE week_start = ?1",
         ))?;
         let mut rows = map_storage_error(statement.query(params![week_start.as_string()]))?;
         let Some(row) = map_storage_error(rows.next())? else {
             return Ok(None);
         };
+
         let week_id: String = map_storage_error(row.get(0))?;
-        self.load_week(&connection, &WeekId(week_id))
+        let stored_week_start: String = map_storage_error(row.get(1))?;
+        let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
+        let entries = self.load_entries(&connection, &week_id)?;
+
+        Ok(Some(WeekSheet {
+            week_id: WeekId(week_id),
+            week_start: WeekStartDate::parse(&stored_week_start)
+                .map_err(|_| StorageError::SerializationFailed)?,
+            entries,
+            overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+        }))
     }
 
     pub fn save_week(&self, week: &WeekSheet) -> Result<(), StorageError> {
@@ -307,7 +318,7 @@ impl DuckDb {
              WHERE NOT EXISTS (SELECT 1 FROM settings WHERE id = 1)",
             params![
                 settings.overtime_threshold.0,
-                theme_to_string(settings.theme),
+                settings.theme.to_string(),
                 configured_days_json,
                 settings.default_work_interval.start.to_hhmm(),
                 settings.default_work_interval.end.to_hhmm(),
@@ -342,10 +353,7 @@ impl DuckDb {
 
         Ok(AppSettings {
             overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
-            theme: match theme.as_str() {
-                "light" => ThemePreference::Light,
-                _ => ThemePreference::Dark,
-            },
+            theme: theme.parse().unwrap_or(ThemePreference::Dark),
             default_work_interval: WorkInterval {
                 start: TimeOfDay::parse(&default_start).map_err(|_| StorageError::SerializationFailed)?,
                 end: TimeOfDay::parse(&default_end).map_err(|_| StorageError::SerializationFailed)?,
@@ -370,7 +378,7 @@ impl DuckDb {
                default_start = ?5, default_end = ?6, default_break = ?7, updated_at = ?8",
             params![
                 settings.overtime_threshold.0,
-                theme_to_string(settings.theme),
+                settings.theme.to_string(),
                 configured_days_json,
                 settings.active_week_id.as_ref().map(|week_id| week_id.0.clone()),
                 settings.default_work_interval.start.to_hhmm(),
@@ -517,13 +525,6 @@ impl DuckDb {
         // Inverser pour avoir l'ordre chronologique
         stats.reverse();
         Ok(stats)
-    }
-}
-
-fn theme_to_string(theme: ThemePreference) -> &'static str {
-    match theme {
-        ThemePreference::Light => "light",
-        ThemePreference::Dark => "dark",
     }
 }
 

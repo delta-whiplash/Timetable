@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{
     logic::{calculate_day_minutes, minutes_to_human_label, minutes_to_label, summarize_week},
-    types::{AppSettings, ConfiguredDay, ThemePreference, TimeOfDay, WeekSheet},
+    types::{AppSettings, ConfiguredDay, TimeOfDay, WeekSheet},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,19 +163,11 @@ pub struct MonthlyStatsView {
     pub weekly_average_label: String,
 }
 
-fn theme_to_string(theme: ThemePreference) -> String {
-    match theme {
-        ThemePreference::Light => "light",
-        ThemePreference::Dark => "dark",
-    }
-    .to_string()
-}
-
 pub fn settings_to_view(settings: &AppSettings) -> SettingsView {
     SettingsView {
         overtime_threshold_minutes: settings.overtime_threshold.0,
         overtime_threshold_label: minutes_to_human_label(settings.overtime_threshold.0),
-        theme: theme_to_string(settings.theme),
+        theme: settings.theme.to_string(),
         default_start: settings.default_work_interval.start.to_hhmm(),
         default_end: settings.default_work_interval.end.to_hhmm(),
         default_break: TimeOfDay(settings.default_break_minutes.0).to_hhmm(),

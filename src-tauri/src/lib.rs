@@ -34,89 +34,35 @@ mod desktop {
         error.into()
     }
 
-    #[tauri::command]
-    fn load_bootstrap(state: State<'_, SharedState>) -> Result<BootstrapState, PublicError> {
-        state
-            .service
-            .load_bootstrap()
-            .map_err(|error| to_public_error("load_bootstrap", error))
+    macro_rules! tauri_command {
+        ($name:ident, $output:ty, $method:ident $(, $arg_name:ident: $arg_ty:ty)?) => {
+            #[tauri::command]
+            fn $name(
+                state: State<'_, SharedState>,
+                $($arg_name: $arg_ty,)?
+            ) -> Result<$output, PublicError> {
+                state
+                    .service
+                    .$method($($arg_name,)?)
+                    .map_err(|error| to_public_error(stringify!($name), error))
+            }
+        };
     }
 
-    #[tauri::command]
-    fn save_week(
-        state: State<'_, SharedState>,
-        input: SaveWeekInput,
-    ) -> Result<WeekSheetView, PublicError> {
-        state
-            .service
-            .save_week(input)
-            .map_err(|error| to_public_error("save_week", error))
-    }
-
-    #[tauri::command]
-    fn create_or_switch_week(
-        state: State<'_, SharedState>,
-        input: WeekSelectorInput,
-    ) -> Result<WeekSheetView, PublicError> {
-        state
-            .service
-            .create_or_switch_week(input)
-            .map_err(|error| to_public_error("create_or_switch_week", error))
-    }
-
-    #[tauri::command]
-    fn list_weeks(state: State<'_, SharedState>) -> Result<Vec<WeekListItem>, PublicError> {
-        state
-            .service
-            .list_weeks()
-            .map_err(|error| to_public_error("list_weeks", error))
-    }
-
-    #[tauri::command]
-    fn delete_week(
-        state: State<'_, SharedState>,
-        input: DeleteWeekInput,
-    ) -> Result<(), PublicError> {
-        state
-            .service
-            .delete_week(input)
-            .map_err(|error| to_public_error("delete_week", error))
-    }
-
-    #[tauri::command]
-    fn load_settings(state: State<'_, SharedState>) -> Result<SettingsView, PublicError> {
-        state
-            .service
-            .load_settings()
-            .map_err(|error| to_public_error("load_settings", error))
-    }
-
-    #[tauri::command]
-    fn save_settings(
-        state: State<'_, SharedState>,
-        input: SaveSettingsInput,
-    ) -> Result<SettingsView, PublicError> {
-        state
-            .service
-            .save_settings(input)
-            .map_err(|error| to_public_error("save_settings", error))
-    }
-
-    #[tauri::command]
-    fn set_theme(state: State<'_, SharedState>, theme: String) -> Result<(), PublicError> {
-        state
-            .service
-            .set_theme(theme)
-            .map_err(|error| to_public_error("set_theme", error))
-    }
-
-    #[tauri::command]
-    fn get_analytics(state: State<'_, SharedState>) -> Result<AnalyticsDataView, PublicError> {
-        state
-            .service
-            .get_analytics()
-            .map_err(|error| to_public_error("get_analytics", error))
-    }
+    tauri_command!(load_bootstrap, BootstrapState, load_bootstrap);
+    tauri_command!(save_week, WeekSheetView, save_week, input: SaveWeekInput);
+    tauri_command!(
+        create_or_switch_week,
+        WeekSheetView,
+        create_or_switch_week,
+        input: WeekSelectorInput
+    );
+    tauri_command!(list_weeks, Vec<WeekListItem>, list_weeks);
+    tauri_command!(delete_week, (), delete_week, input: DeleteWeekInput);
+    tauri_command!(load_settings, SettingsView, load_settings);
+    tauri_command!(save_settings, SettingsView, save_settings, input: SaveSettingsInput);
+    tauri_command!(set_theme, (), set_theme, theme: String);
+    tauri_command!(get_analytics, AnalyticsDataView, get_analytics);
 
     fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         let app_data_dir = app

@@ -172,6 +172,27 @@ pub enum ThemePreference {
     Dark,
 }
 
+impl std::fmt::Display for ThemePreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ThemePreference::Light => "light",
+            ThemePreference::Dark => "dark",
+        })
+    }
+}
+
+impl std::str::FromStr for ThemePreference {
+    type Err = super::errors::ConfigError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "light" => Ok(ThemePreference::Light),
+            "dark" => Ok(ThemePreference::Dark),
+            _ => Err(super::errors::ConfigError::Invalid),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSettings {
     pub overtime_threshold: OvertimeThresholdMinutes,
