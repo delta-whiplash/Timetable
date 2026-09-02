@@ -4,14 +4,14 @@ use chrono::Utc;
 use duckdb::{params, Connection};
 
 use crate::{
-    application::ports::{AnalyticsRepository, DiagnosticsStore, SettingsRepository, WeekRepository},
+    application::ports::{AnalyticsRepository, SettingsRepository, WeekRepository},
     application::dto::{DayOfWeekStats, MonthlyStatsView, WeeklyTrendPoint},
     domain::{
         errors::StorageError,
         logic::{default_settings, minutes_to_label},
         types::{
-            AppMetadata, AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
-            DefaultWorkInterval, DiagnosticSnapshot, OvertimeThresholdMinutes, ThemePreference,
+            AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
+            DefaultWorkInterval, OvertimeThresholdMinutes, ThemePreference,
             TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
         },
     },
@@ -137,35 +137,6 @@ impl WeekRepository for DuckDbWeekRepository {
                 default_break TEXT NOT NULL DEFAULT '01:00',
                 updated_at TEXT NOT NULL
             )",
-            [],
-        ))?;
-
-        // Create diagnostic_snapshots table
-        map_storage_error(connection.execute(
-            "CREATE TABLE IF NOT EXISTS diagnostic_snapshots (
-                snapshot_id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                reason TEXT NOT NULL,
-                correlation_id TEXT NOT NULL,
-                payload_json TEXT NOT NULL
-            )",
-            [],
-        ))?;
-
-        // Create app_metadata table
-        map_storage_error(connection.execute(
-            "CREATE TABLE IF NOT EXISTS app_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )",
-            [],
-        ))?;
-
-        // Initialize metadata
-        map_storage_error(connection.execute(
-            "INSERT INTO app_metadata (key, value)
-             SELECT 'latest_migration_status', 'success'
-             WHERE NOT EXISTS (SELECT 1 FROM app_metadata WHERE key = 'latest_migration_status')",
             [],
         ))?;
 
@@ -349,24 +320,6 @@ impl WeekRepository for DuckDbWeekRepository {
             statement.query_row(params![up_to_week_start.as_string()], |row| row.get(0));
         map_storage_error(balance)
     }
-
-    fn metadata(&self) -> Result<AppMetadata, StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        let mut statement = map_storage_error(connection.prepare(
-            "SELECT value FROM app_metadata WHERE key = ?1",
-        ))?;
-        let value: Result<String, duckdb::Error> =
-            statement.query_row(params!["latest_migration_status"], |row| row.get(0));
-        Ok(AppMetadata {
-            latest_migration_status: value.unwrap_or_else(|_| "unknown".to_string()),
-        })
-    }
-
-    fn ping(&self) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        map_storage_error(connection.execute("SELECT 1", []))?;
-        Ok(())
-    }
 }
 
 impl AnalyticsRepository for DuckDbWeekRepository {
@@ -415,13 +368,8 @@ impl AnalyticsRepository for DuckDbWeekRepository {
             };
 
             stats.push(DayOfWeekStats {
-                day_index,
                 day_name: day_names.get(day_index as usize).copied().unwrap_or(day_name.as_str()).to_string(),
-                entry_count,
                 average_minutes,
-                average_label: minutes_to_label(average_minutes as u16),
-                total_minutes,
-                total_label: minutes_to_label(total_minutes as u16),
             });
         }
 
@@ -435,7 +383,6 @@ impl AnalyticsRepository for DuckDbWeekRepository {
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 w.week_start,
-                w.overtime_threshold_minutes,
                 COALESCE(SUM(
                     CASE
                         WHEN de.enabled = 1
@@ -444,17 +391,10 @@ impl AnalyticsRepository for DuckDbWeekRepository {
                         THEN GREATEST(0, de.end_minutes - de.start_minutes - de.break_minutes)
                         ELSE 0
                     END
-                ), 0) as total_minutes,
-                COUNT(CASE
-                    WHEN de.enabled = 1
-                        AND de.start_minutes IS NOT NULL
-                        AND de.end_minutes IS NOT NULL
-                        AND (de.end_minutes - de.start_minutes - de.break_minutes) > 0
-                    THEN 1
-                END) as worked_days
+                ), 0) as total_minutes
             FROM weeks w
             LEFT JOIN day_entries de ON w.id = de.week_id
-            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes
+            GROUP BY w.id, w.week_start
             ORDER BY w.week_start DESC
             LIMIT 12",
         ))?;
@@ -464,22 +404,11 @@ impl AnalyticsRepository for DuckDbWeekRepository {
 
         while let Some(row) = map_storage_error(rows.next())? {
             let week_start: String = map_storage_error(row.get(0))?;
-            let overtime_threshold: i64 = map_storage_error(row.get(1))?;
-            let total_minutes: i64 = map_storage_error(row.get(2))?;
-            let worked_days: i64 = map_storage_error(row.get(3))?;
-
-            let total_minutes = total_minutes.max(0) as u32;
-            let overtime_threshold = overtime_threshold.max(0) as u32;
-            let overtime_minutes = total_minutes.saturating_sub(overtime_threshold);
-            let worked_days = worked_days.max(0) as u8;
+            let total_minutes: i64 = map_storage_error(row.get(1))?;
 
             trends.push(WeeklyTrendPoint {
                 week_start,
-                total_minutes,
-                total_label: minutes_to_label(total_minutes as u16),
-                worked_days,
-                overtime_minutes,
-                overtime_label: minutes_to_label(overtime_minutes as u16),
+                total_minutes: total_minutes.max(0) as u32,
             });
         }
 
@@ -529,10 +458,7 @@ impl AnalyticsRepository for DuckDbWeekRepository {
 
             stats.push(MonthlyStatsView {
                 month,
-                weeks_count,
-                total_minutes,
                 total_label: minutes_to_label(total_minutes as u16),
-                weekly_average_minutes,
                 weekly_average_label: minutes_to_label(weekly_average_minutes as u16),
             });
         }
@@ -640,52 +566,6 @@ impl SettingsRepository for DuckDbSettingsRepository {
             ],
         ))?;
         Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct DuckDbDiagnosticsStore {
-    database_path: PathBuf,
-}
-
-impl DuckDbDiagnosticsStore {
-    pub fn new(database_path: PathBuf) -> Self {
-        Self { database_path }
-    }
-}
-
-impl DiagnosticsStore for DuckDbDiagnosticsStore {
-    fn save_snapshot(&self, snapshot: &DiagnosticSnapshot) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        map_storage_error(connection.execute(
-            "INSERT INTO diagnostic_snapshots
-             (snapshot_id, created_at, reason, correlation_id, payload_json)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (snapshot_id) DO UPDATE SET
-               created_at = ?2, reason = ?3, correlation_id = ?4, payload_json = ?5",
-            params![
-                snapshot.snapshot_id,
-                snapshot.created_at,
-                snapshot.reason,
-                snapshot.correlation_id,
-                snapshot.payload_json
-            ],
-        ))?;
-        Ok(())
-    }
-
-    fn latest_snapshot_id(&self) -> Result<Option<String>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        let mut statement = map_storage_error(connection.prepare(
-            "SELECT snapshot_id FROM diagnostic_snapshots ORDER BY created_at DESC LIMIT 1",
-        ))?;
-        let mut rows = map_storage_error(statement.query([]))?;
-        if let Some(row) = map_storage_error(rows.next())? {
-            let snapshot_id: String = map_storage_error(row.get(0))?;
-            Ok(Some(snapshot_id))
-        } else {
-            Ok(None)
-        }
     }
 }
 

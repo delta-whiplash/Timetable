@@ -1,18 +1,15 @@
 use super::{
     errors::ValidationError,
     types::{
-        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, DayWorkSummary,
-        DefaultBreakMinutes, DefaultWorkInterval, ThemePreference,
-        WeekSheet, WeekSummary, WorkedMinutes, WorkInterval,
+        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, DefaultBreakMinutes,
+        DefaultWorkInterval, ThemePreference, WeekSheet, WeekSummary, WorkedMinutes, WorkInterval,
     },
 };
 
-#[doc(alias = "duration formatter")]
 pub fn minutes_to_label(minutes: u16) -> String {
     format!("{}h{:02}", minutes / 60, minutes % 60)
 }
 
-#[doc(alias = "human duration formatter")]
 pub fn minutes_to_human_label(minutes: u16) -> String {
     if minutes < 60 {
         format!("{} min", minutes)
@@ -47,7 +44,6 @@ pub fn default_theme() -> ThemePreference {
     ThemePreference::Dark
 }
 
-#[doc(alias = "new week")]
 pub fn default_entries(configured_days: &[ConfiguredDay]) -> Vec<DayEntry> {
     configured_days
         .iter()
@@ -114,40 +110,20 @@ pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
     Ok(interval.end.0 - interval.start.0 - entry.break_minutes.0)
 }
 
-#[doc(alias = "week summary")]
 pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError> {
     let mut total = 0_u16;
     let mut worked_days = 0_u8;
-    let mut details = Vec::new();
 
     for entry in &sheet.entries {
         let minutes = calculate_day_minutes(entry)?;
         if minutes > 0 {
             total = total.saturating_add(minutes);
             worked_days = worked_days.saturating_add(1);
-            details.push(DayWorkSummary {
-                day_id: entry.day_id,
-                label: entry.label.clone(),
-                worked_minutes: WorkedMinutes(minutes),
-            });
         }
     }
 
-    details.sort_by_key(|item| item.worked_minutes.0);
-
-    let overtime = total.saturating_sub(sheet.overtime_threshold.0);
-    let average = if worked_days == 0 {
-        0
-    } else {
-        total / u16::from(worked_days)
-    };
-
     Ok(WeekSummary {
         total_minutes: WorkedMinutes(total),
-        overtime_minutes: WorkedMinutes(overtime),
-        average_minutes: WorkedMinutes(average),
-        longest_day: details.last().cloned(),
-        shortest_day: details.first().cloned(),
         worked_days,
     })
 }
@@ -161,16 +137,6 @@ pub fn signed_minutes_to_label(minutes: i32) -> String {
         format!("-{label}")
     } else {
         label
-    }
-}
-
-pub fn quick_read(summary: &WeekSummary) -> String {
-    match (&summary.longest_day, &summary.shortest_day) {
-        (Some(longest), Some(shortest)) => format!(
-            "{} jour(s) saisi(s). Plus longue : {}. Plus courte : {}.",
-            summary.worked_days, longest.label.0, shortest.label.0
-        ),
-        _ => "Aucun horaire saisi pour le moment.".to_string(),
     }
 }
 
@@ -223,9 +189,7 @@ mod tests {
         let summary = summarize_week(&sheet).expect("summary should be valid");
 
         assert_eq!(summary.total_minutes.0, 1050);
-        assert_eq!(summary.overtime_minutes.0, 0);
-        assert_eq!(summary.average_minutes.0, 525);
-        assert_eq!(quick_read(&summary), "2 jour(s) saisi(s). Plus longue : Jour 0. Plus courte : Jour 1.");
+        assert_eq!(summary.worked_days, 2);
     }
 
     #[test]

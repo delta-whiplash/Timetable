@@ -6,18 +6,11 @@ use super::errors::ValidationError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-#[doc(alias = "week identifier")]
 pub struct WeekId(pub String);
 
 impl WeekId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
-    }
-}
-
-impl Default for WeekId {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -27,7 +20,6 @@ pub struct DayId(pub u8);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-#[doc(alias = "week date")]
 pub struct WeekStartDate(pub NaiveDate);
 
 impl WeekStartDate {
@@ -182,19 +174,8 @@ pub struct WeekSheet {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DayWorkSummary {
-    pub day_id: DayId,
-    pub label: DayLabel,
-    pub worked_minutes: WorkedMinutes,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeekSummary {
     pub total_minutes: WorkedMinutes,
-    pub overtime_minutes: WorkedMinutes,
-    pub average_minutes: WorkedMinutes,
-    pub longest_day: Option<DayWorkSummary>,
-    pub shortest_day: Option<DayWorkSummary>,
     pub worked_days: u8,
 }
 
@@ -213,20 +194,6 @@ pub struct AppSettings {
     pub default_break_minutes: DefaultBreakMinutes,
     pub configured_days: Vec<ConfiguredDay>,
     pub active_week_id: Option<WeekId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DiagnosticSnapshot {
-    pub snapshot_id: String,
-    pub created_at: String,
-    pub reason: String,
-    pub correlation_id: String,
-    pub payload_json: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AppMetadata {
-    pub latest_migration_status: String,
 }
 
 pub fn default_configured_days() -> Vec<ConfiguredDay> {

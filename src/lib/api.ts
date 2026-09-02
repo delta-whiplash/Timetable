@@ -6,8 +6,6 @@ import type {
   SaveSettingsInput,
   SaveWeekInput,
   SettingsView,
-  ThemeInput,
-  ThemeView,
   WeekListItem,
   WeekSelectorInput,
   WeekSheetView
@@ -41,8 +39,8 @@ export function saveSettings(input: SaveSettingsInput): Promise<SettingsView> {
   return invoke("save_settings", { input });
 }
 
-export function setTheme(input: ThemeInput): Promise<ThemeView> {
-  return invoke("set_theme", { input });
+export function setTheme(theme: string): Promise<void> {
+  return invoke("set_theme", { theme });
 }
 
 export function getAnalytics(): Promise<AnalyticsDataView> {

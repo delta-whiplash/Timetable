@@ -28,8 +28,6 @@ pub enum ValidationError {
 pub enum StorageError {
     #[error("storage_unavailable")]
     StorageUnavailable,
-    #[error("migration_failed")]
-    MigrationFailed,
     #[error("query_failed")]
     QueryFailed,
     #[error("serialization_failed")]
@@ -81,7 +79,6 @@ impl ApplicationError {
             },
             Self::Storage(error) => match error {
                 StorageError::StorageUnavailable => "storage.unavailable",
-                StorageError::MigrationFailed => "storage.migration_failed",
                 StorageError::QueryFailed => "storage.query_failed",
                 StorageError::SerializationFailed => "storage.serialization_failed",
                 StorageError::EntityNotFound => "storage.entity_not_found",
@@ -122,9 +119,6 @@ impl ApplicationError {
             },
             Self::Storage(StorageError::StorageUnavailable) => {
                 "Le stockage local est momentanément indisponible."
-            }
-            Self::Storage(StorageError::MigrationFailed) => {
-                "La base locale n'a pas pu être initialisée correctement."
             }
             Self::Storage(StorageError::QueryFailed) => {
                 "Une opération locale a échoué."

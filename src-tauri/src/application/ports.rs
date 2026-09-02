@@ -1,7 +1,7 @@
 use crate::application::dto::{DayOfWeekStats, MonthlyStatsView, WeeklyTrendPoint};
 use crate::domain::{
     errors::StorageError,
-    types::{AppMetadata, AppSettings, DiagnosticSnapshot, WeekId, WeekSheet, WeekStartDate},
+    types::{AppSettings, WeekId, WeekSheet, WeekStartDate},
 };
 
 /// Trait pour la récupération des données analytiques
@@ -24,17 +24,10 @@ pub trait WeekRepository: Send + Sync {
     fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError>;
     fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError>;
     fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError>;
-    fn metadata(&self) -> Result<AppMetadata, StorageError>;
-    fn ping(&self) -> Result<(), StorageError>;
 }
 
 pub trait SettingsRepository: Send + Sync {
     fn ensure_default_settings(&self) -> Result<(), StorageError>;
     fn load_settings(&self) -> Result<AppSettings, StorageError>;
     fn save_settings(&self, settings: &AppSettings) -> Result<(), StorageError>;
-}
-
-pub trait DiagnosticsStore: Send + Sync {
-    fn save_snapshot(&self, snapshot: &DiagnosticSnapshot) -> Result<(), StorageError>;
-    fn latest_snapshot_id(&self) -> Result<Option<String>, StorageError>;
 }

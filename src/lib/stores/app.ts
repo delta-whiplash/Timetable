@@ -91,7 +91,7 @@ function createAppStore() {
 
   async function changeTheme(theme: ThemePreference) {
     try {
-      await setTheme({ theme });
+      await setTheme(theme);
       document.documentElement.dataset.theme = theme;
       await refreshSecondaryData();
     } catch (error) {

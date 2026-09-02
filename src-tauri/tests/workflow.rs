@@ -5,13 +5,11 @@ use std::sync::Arc;
 use timetable_desktop_lib::{
     application::{
         dto::{SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput},
+        ports::{SettingsRepository, WeekRepository},
         service::ApplicationService,
     },
     domain::{logic::default_settings, types::WeekStartDate},
-    infrastructure::{
-        config::AppRuntimeConfig,
-        duckdb::{DuckDbDiagnosticsStore, DuckDbSettingsRepository, DuckDbWeekRepository},
-    },
+    infrastructure::duckdb::{DuckDbSettingsRepository, DuckDbWeekRepository},
 };
 use tempfile::tempdir;
 
@@ -22,16 +20,14 @@ fn saves_week_and_updates_summary() {
 
     let week_repository = Arc::new(DuckDbWeekRepository::new(db_path.clone()));
     let settings_repository = Arc::new(DuckDbSettingsRepository::new(db_path.clone()));
-    let diagnostics_repository = Arc::new(DuckDbDiagnosticsStore::new(db_path.clone()));
 
     week_repository.migrate().expect("migrate");
     settings_repository.ensure_default_settings().expect("default settings");
 
     let service = ApplicationService::new(
-        week_repository,
+        week_repository.clone(),
         settings_repository,
-        diagnostics_repository,
-        AppRuntimeConfig::new(db_path, "timetable-desktop", "0.1.0", "com.delta.timetable", 1),
+        week_repository,
     );
 
     let bootstrap = service.load_bootstrap().expect("bootstrap");
@@ -104,13 +100,18 @@ fn saves_week_and_updates_summary() {
         })
         .expect("save week");
 
-    assert_eq!(result.summary.totalLabel, "18h00");
-    assert_eq!(result.summary.workedDays, 2);
+    assert_eq!(result.summary.total_label, "18h00");
+    assert_eq!(result.entries[0].total_minutes, 540);
+    assert_eq!(result.entries[1].total_minutes, 540);
 
+    let defaults = default_settings();
     let updated_settings = service
         .save_settings(SaveSettingsInput {
             overtime_threshold_minutes: 30 * 60,
-            configured_days: default_settings()
+            default_start: defaults.default_work_interval.start.to_hhmm(),
+            default_end: defaults.default_work_interval.end.to_hhmm(),
+            default_break: "01:00".to_string(),
+            configured_days: defaults
                 .configured_days
                 .into_iter()
                 .map(|day| timetable_desktop_lib::application::dto::ConfiguredDayView {
@@ -122,6 +123,6 @@ fn saves_week_and_updates_summary() {
         })
         .expect("save settings");
 
-    assert_eq!(updated_settings.overtimeThresholdMinutes, 1800);
+    assert_eq!(updated_settings.overtime_threshold_minutes, 1800);
     assert_eq!(WeekStartDate::parse("2026-03-12").expect("date").as_string(), "2026-03-09");
 }

@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    logic::{calculate_day_minutes, minutes_to_human_label, minutes_to_label, quick_read, summarize_week},
-    types::{
-        AppSettings, ConfiguredDay, DayWorkSummary, ThemePreference, WeekSheet,
-        TimeOfDay,
-    },
+    logic::{calculate_day_minutes, minutes_to_human_label, minutes_to_label, summarize_week},
+    types::{AppSettings, ConfiguredDay, ThemePreference, TimeOfDay, WeekSheet},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,18 +57,6 @@ pub struct SaveSettingsInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ThemeInput {
-    pub theme: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ThemeView {
-    pub theme: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DayEntryView {
     pub day_id: u8,
     pub label: String,
@@ -85,26 +70,8 @@ pub struct DayEntryView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DaySummaryView {
-    pub day_id: u8,
-    pub label: String,
-    pub worked_minutes: u16,
-    pub worked_label: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct WeekSummaryView {
-    pub total_minutes: u16,
     pub total_label: String,
-    pub overtime_minutes: u16,
-    pub overtime_label: String,
-    pub average_minutes: u16,
-    pub average_label: String,
-    pub worked_days: u8,
-    pub longest_day: Option<DaySummaryView>,
-    pub shortest_day: Option<DaySummaryView>,
-    pub quick_read: String,
     pub percentage: u8,
     pub cumulative_balance_minutes: i32,
     pub cumulative_balance_label: String,
@@ -147,40 +114,7 @@ pub struct SettingsView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapState {
-    pub theme: String,
-    pub overtime_threshold_minutes: u16,
     pub active_week: WeekSheetView,
-    pub config_checksum: String,
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppStatusView {
-    pub version: String,
-    pub config_checksum: String,
-    pub storage_status: String,
-    pub latest_migration_status: String,
-    pub active_week_id: Option<String>,
-    pub latest_diagnostic_snapshot_id: Option<String>,
-}
-
-/// Export complet des données utilisateur
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DataExport {
-    pub version: String,
-    pub exported_at: String,
-    pub settings: SettingsView,
-    pub weeks: Vec<WeekSheetView>,
-}
-
-/// Import complet des données utilisateur
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DataImport {
-    pub settings: SettingsView,
-    pub weeks: Vec<WeekSheetView>,
 }
 
 /// Vue principale des données analytiques
@@ -201,20 +135,10 @@ pub struct AnalyticsDataView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DayOfWeekStats {
-    /// Index du jour (0=Lundi, 1=Mardi, ..., 6=Dimanche)
-    pub day_index: u8,
     /// Nom du jour
     pub day_name: String,
-    /// Nombre total d'entrées pour ce jour
-    pub entry_count: u32,
     /// Heures moyennes travaillées pour ce jour (en minutes)
     pub average_minutes: u32,
-    /// Libellé formaté des heures moyennes
-    pub average_label: String,
-    /// Heures totales travaillées pour ce jour (en minutes)
-    pub total_minutes: u32,
-    /// Libellé formaté des heures totales
-    pub total_label: String,
 }
 
 /// Point de données pour la tendance hebdomadaire
@@ -225,14 +149,6 @@ pub struct WeeklyTrendPoint {
     pub week_start: String,
     /// Heures totales travaillées cette semaine (en minutes)
     pub total_minutes: u32,
-    /// Libellé formaté des heures
-    pub total_label: String,
-    /// Nombre de jours travaillés cette semaine
-    pub worked_days: u8,
-    /// Heures supplémentaires (en minutes)
-    pub overtime_minutes: u32,
-    /// Libellé formaté des heures supplémentaires
-    pub overtime_label: String,
 }
 
 /// Statistiques mensuelles agrégées
@@ -241,14 +157,8 @@ pub struct WeeklyTrendPoint {
 pub struct MonthlyStatsView {
     /// Année et mois (format: YYYY-MM)
     pub month: String,
-    /// Nombre de semaines avec des données ce mois-ci
-    pub weeks_count: u32,
-    /// Heures totales travaillées ce mois (en minutes)
-    pub total_minutes: u32,
     /// Libellé formaté des heures totales
     pub total_label: String,
-    /// Moyenne hebdomadaire ce mois (en minutes)
-    pub weekly_average_minutes: u32,
     /// Libellé formaté de la moyenne hebdomadaire
     pub weekly_average_label: String,
 }
@@ -259,15 +169,6 @@ fn theme_to_string(theme: ThemePreference) -> String {
         ThemePreference::Dark => "dark",
     }
     .to_string()
-}
-
-fn day_summary_to_view(day_summary: Option<DayWorkSummary>) -> Option<DaySummaryView> {
-    day_summary.map(|item| DaySummaryView {
-        day_id: item.day_id.0,
-        label: item.label.0,
-        worked_minutes: item.worked_minutes.0,
-        worked_label: minutes_to_label(item.worked_minutes.0),
-    })
 }
 
 pub fn settings_to_view(settings: &AppSettings) -> SettingsView {
@@ -295,7 +196,10 @@ pub fn configured_day_to_view(day: &ConfiguredDay) -> ConfiguredDayView {
     }
 }
 
-pub fn week_to_view(week: &WeekSheet) -> Result<WeekSheetView, crate::domain::errors::ValidationError> {
+pub fn week_to_view(
+    week: &WeekSheet,
+    cumulative_balance_minutes: i32,
+) -> Result<WeekSheetView, crate::domain::errors::ValidationError> {
     let summary = summarize_week(week)?;
     let entries = week
         .entries
@@ -321,23 +225,17 @@ pub fn week_to_view(week: &WeekSheet) -> Result<WeekSheetView, crate::domain::er
         entries,
         overtime_threshold_minutes: week.overtime_threshold.0,
         summary: WeekSummaryView {
-            total_minutes: summary.total_minutes.0,
             total_label: minutes_to_label(summary.total_minutes.0),
-            overtime_minutes: summary.overtime_minutes.0,
-            overtime_label: minutes_to_label(summary.overtime_minutes.0),
-            average_minutes: summary.average_minutes.0,
-            average_label: minutes_to_label(summary.average_minutes.0),
-            worked_days: summary.worked_days,
-            longest_day: day_summary_to_view(summary.longest_day.clone()),
-            shortest_day: day_summary_to_view(summary.shortest_day.clone()),
-            quick_read: quick_read(&summary),
             percentage: if week.overtime_threshold.0 > 0 {
-                ((summary.total_minutes.0 as f64 / week.overtime_threshold.0 as f64) * 100.0) as u8
+                (u32::from(summary.total_minutes.0) * 100 / u32::from(week.overtime_threshold.0))
+                    .min(255) as u8
             } else {
                 0
             },
-            cumulative_balance_minutes: 0,
-            cumulative_balance_label: "+0h00".to_string(),
+            cumulative_balance_minutes,
+            cumulative_balance_label: crate::domain::logic::signed_minutes_to_label(
+                cumulative_balance_minutes,
+            ),
         },
     })
 }

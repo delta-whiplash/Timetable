@@ -52,10 +52,6 @@ export interface SettingsView {
   activeWeekId: string | null;
 }
 
-export interface ThemeView {
-  theme: ThemePreference;
-}
-
 export interface BootstrapState {
   activeWeek: WeekSheetView;
 }
@@ -90,10 +86,6 @@ export interface SaveSettingsInput {
   defaultEnd: string;
   defaultBreak: string;
   configuredDays: ConfiguredDayView[];
-}
-
-export interface ThemeInput {
-  theme: ThemePreference;
 }
 
 export interface CommandError {

@@ -4,20 +4,15 @@ pub mod infrastructure;
 
 #[cfg(feature = "desktop")]
 mod desktop {
-    use std::{
-        fs,
-        path::PathBuf,
-        sync::{Arc, OnceLock},
-    };
+    use std::{fs, path::PathBuf, sync::Arc};
 
     use tauri::{Manager, State};
 
     use crate::{
         application::{
             dto::{
-                AnalyticsDataView, AppStatusView, BootstrapState, DeleteWeekInput, SaveSettingsInput,
-                SaveWeekInput, SettingsView, ThemeInput, ThemeView, WeekListItem, WeekSelectorInput,
-                WeekSheetView,
+                AnalyticsDataView, BootstrapState, DeleteWeekInput, SaveSettingsInput,
+                SaveWeekInput, SettingsView, WeekListItem, WeekSelectorInput, WeekSheetView,
             },
             ports::{SettingsRepository, WeekRepository},
             service::ApplicationService,
@@ -25,26 +20,19 @@ mod desktop {
         domain::errors::{ApplicationError, PublicError},
         infrastructure::{
             config::AppRuntimeConfig,
-            duckdb::{DuckDbDiagnosticsStore, DuckDbSettingsRepository, DuckDbWeekRepository},
+            duckdb::{DuckDbSettingsRepository, DuckDbWeekRepository},
             tracing::init_tracing,
         },
     };
-
-    static RUNTIME_CONFIG: OnceLock<AppRuntimeConfig> = OnceLock::new();
 
     pub struct SharedState {
         service: Arc<ApplicationService>,
     }
 
-    fn to_public_error(
-        service: &ApplicationService,
-        context: &'static str,
-        error: ApplicationError,
-    ) -> PublicError {
+    fn to_public_error(context: &'static str, error: ApplicationError) -> PublicError {
         if !matches!(error, ApplicationError::Validation(_)) {
-            service.capture_error(context, &error);
+            tracing::error!(context, code = error.code(), "tauri command failed");
         }
-
         error.into()
     }
 
@@ -53,15 +41,7 @@ mod desktop {
         state
             .service
             .load_bootstrap()
-            .map_err(|error| to_public_error(&state.service, "load_bootstrap", error))
-    }
-
-    #[tauri::command]
-    fn get_active_week(state: State<'_, SharedState>) -> Result<WeekSheetView, PublicError> {
-        state
-            .service
-            .get_active_week()
-            .map_err(|error| to_public_error(&state.service, "get_active_week", error))
+            .map_err(|error| to_public_error("load_bootstrap", error))
     }
 
     #[tauri::command]
@@ -72,7 +52,7 @@ mod desktop {
         state
             .service
             .save_week(input)
-            .map_err(|error| to_public_error(&state.service, "save_week", error))
+            .map_err(|error| to_public_error("save_week", error))
     }
 
     #[tauri::command]
@@ -83,7 +63,7 @@ mod desktop {
         state
             .service
             .create_or_switch_week(input)
-            .map_err(|error| to_public_error(&state.service, "create_or_switch_week", error))
+            .map_err(|error| to_public_error("create_or_switch_week", error))
     }
 
     #[tauri::command]
@@ -91,7 +71,7 @@ mod desktop {
         state
             .service
             .list_weeks()
-            .map_err(|error| to_public_error(&state.service, "list_weeks", error))
+            .map_err(|error| to_public_error("list_weeks", error))
     }
 
     #[tauri::command]
@@ -102,7 +82,7 @@ mod desktop {
         state
             .service
             .delete_week(input)
-            .map_err(|error| to_public_error(&state.service, "delete_week", error))
+            .map_err(|error| to_public_error("delete_week", error))
     }
 
     #[tauri::command]
@@ -110,7 +90,7 @@ mod desktop {
         state
             .service
             .load_settings()
-            .map_err(|error| to_public_error(&state.service, "load_settings", error))
+            .map_err(|error| to_public_error("load_settings", error))
     }
 
     #[tauri::command]
@@ -121,45 +101,15 @@ mod desktop {
         state
             .service
             .save_settings(input)
-            .map_err(|error| to_public_error(&state.service, "save_settings", error))
+            .map_err(|error| to_public_error("save_settings", error))
     }
 
     #[tauri::command]
-    fn set_theme(
-        state: State<'_, SharedState>,
-        input: ThemeInput,
-    ) -> Result<ThemeView, PublicError> {
+    fn set_theme(state: State<'_, SharedState>, theme: String) -> Result<(), PublicError> {
         state
             .service
-            .set_theme(input)
-            .map_err(|error| to_public_error(&state.service, "set_theme", error))
-    }
-
-    #[tauri::command]
-    fn get_app_status(state: State<'_, SharedState>) -> Result<AppStatusView, PublicError> {
-        state
-            .service
-            .get_app_status()
-            .map_err(|error| to_public_error(&state.service, "get_app_status", error))
-    }
-
-    #[tauri::command]
-    fn export_data(state: State<'_, SharedState>) -> Result<String, PublicError> {
-        state
-            .service
-            .export_data()
-            .map_err(|error| to_public_error(&state.service, "export_data", error))
-    }
-
-    #[tauri::command]
-    fn import_data(
-        state: State<'_, SharedState>,
-        json_data: String,
-    ) -> Result<BootstrapState, PublicError> {
-        state
-            .service
-            .import_data(json_data)
-            .map_err(|error| to_public_error(&state.service, "import_data", error))
+            .set_theme(theme)
+            .map_err(|error| to_public_error("set_theme", error))
     }
 
     #[tauri::command]
@@ -167,7 +117,7 @@ mod desktop {
         state
             .service
             .get_analytics()
-            .map_err(|error| to_public_error(&state.service, "get_analytics", error))
+            .map_err(|error| to_public_error("get_analytics", error))
     }
 
     fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -200,14 +150,10 @@ mod desktop {
                     1,
                 );
 
-                let runtime_config = RUNTIME_CONFIG.get_or_init(|| runtime_config).clone();
-
                 let week_repository =
                     Arc::new(DuckDbWeekRepository::new(runtime_config.database_path.clone()));
                 let settings_repository =
                     Arc::new(DuckDbSettingsRepository::new(runtime_config.database_path.clone()));
-                let diagnostics_store =
-                    Arc::new(DuckDbDiagnosticsStore::new(runtime_config.database_path.clone()));
 
                 week_repository
                     .migrate()
@@ -219,9 +165,7 @@ mod desktop {
                 let service = Arc::new(ApplicationService::new(
                     week_repository.clone(),
                     settings_repository,
-                    diagnostics_store,
                     week_repository, // DuckDbWeekRepository implémente aussi AnalyticsRepository
-                    runtime_config,
                 ));
 
                 app.manage(SharedState { service });
@@ -229,7 +173,6 @@ mod desktop {
             })
             .invoke_handler(tauri::generate_handler![
                 load_bootstrap,
-                get_active_week,
                 save_week,
                 create_or_switch_week,
                 list_weeks,
@@ -237,9 +180,6 @@ mod desktop {
                 load_settings,
                 save_settings,
                 set_theme,
-                get_app_status,
-                export_data,
-                import_data,
                 get_analytics
             ])
             .run(tauri::generate_context!())

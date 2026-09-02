@@ -1,37 +1,31 @@
 use std::sync::{Arc, RwLock};
 
-use chrono::Utc;
-use serde_json::json;
-use tracing::{error, info};
-use uuid::Uuid;
+use tracing::info;
 
 use crate::{
     application::{
         dto::{
-            settings_to_view, week_to_view, AnalyticsDataView, AppStatusView, BootstrapState,
-            DataExport, DeleteWeekInput, SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput,
-            SettingsView, ThemeInput, ThemeView, WeekListItem, WeekSelectorInput, WeekSheetView,
+            settings_to_view, week_to_view, AnalyticsDataView, BootstrapState, DeleteWeekInput,
+            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekListItem,
+            WeekSelectorInput, WeekSheetView,
         },
-        ports::{AnalyticsRepository, DiagnosticsStore, SettingsRepository, WeekRepository},
+        ports::{AnalyticsRepository, SettingsRepository, WeekRepository},
     },
     domain::{
         errors::{ApplicationError, ConfigError, StorageError, ValidationError},
-        logic::{default_entries, minutes_to_label, signed_minutes_to_label, summarize_week},
+        logic::{default_entries, minutes_to_label, summarize_week},
         types::{
-            AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel, DefaultBreakMinutes,
-            DefaultWorkInterval, DiagnosticSnapshot, OvertimeThresholdMinutes, ThemePreference,
+            AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel,
+            DefaultBreakMinutes, DefaultWorkInterval, OvertimeThresholdMinutes, ThemePreference,
             TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
         },
     },
-    infrastructure::config::AppRuntimeConfig,
 };
 
 pub struct ApplicationService {
     week_repository: Arc<dyn WeekRepository>,
     settings_repository: Arc<dyn SettingsRepository>,
-    diagnostics_store: Arc<dyn DiagnosticsStore>,
     analytics_repository: Arc<dyn AnalyticsRepository>,
-    runtime_config: AppRuntimeConfig,
     cached_settings: Arc<RwLock<Option<AppSettings>>>,
 }
 
@@ -39,16 +33,12 @@ impl ApplicationService {
     pub fn new(
         week_repository: Arc<dyn WeekRepository>,
         settings_repository: Arc<dyn SettingsRepository>,
-        diagnostics_store: Arc<dyn DiagnosticsStore>,
         analytics_repository: Arc<dyn AnalyticsRepository>,
-        runtime_config: AppRuntimeConfig,
     ) -> Self {
         Self {
             week_repository,
             settings_repository,
-            diagnostics_store,
             analytics_repository,
-            runtime_config,
             cached_settings: Arc::new(RwLock::new(None)),
         }
     }
@@ -71,14 +61,7 @@ impl ApplicationService {
         Ok(settings)
     }
 
-    fn invalidate_settings_cache(&self) {
-        if let Ok(mut cache) = self.cached_settings.write() {
-            *cache = None;
-        }
-    }
-
     fn week_to_view_with_balance(&self, week: &WeekSheet) -> Result<WeekSheetView, ApplicationError> {
-        let mut view = week_to_view(week).map_err(ApplicationError::from)?;
         let balance = match self.week_repository.get_cumulative_balance(&week.week_start) {
             Ok(value) => value,
             Err(error) => {
@@ -86,9 +69,7 @@ impl ApplicationService {
                 0
             }
         };
-        view.summary.cumulative_balance_minutes = balance;
-        view.summary.cumulative_balance_label = signed_minutes_to_label(balance);
-        Ok(view)
+        week_to_view(week, balance).map_err(ApplicationError::from)
     }
 
     fn save_settings_and_cache(&self, settings: &AppSettings) -> Result<(), ApplicationError> {
@@ -101,45 +82,12 @@ impl ApplicationService {
         Ok(())
     }
 
-    pub fn capture_error(&self, context: &str, error: &ApplicationError) {
-        let snapshot = DiagnosticSnapshot {
-            snapshot_id: Uuid::new_v4().to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            reason: context.to_string(),
-            correlation_id: Uuid::new_v4().to_string(),
-            payload_json: json!({
-                "context": context,
-                "code": error.code(),
-                "retryable": error.retryable(),
-                "version": self.runtime_config.version,
-            })
-            .to_string(),
-        };
-
-        if let Err(snapshot_error) = self.diagnostics_store.save_snapshot(&snapshot) {
-            error!(
-                code = error.code(),
-                snapshot_code = ?snapshot_error,
-                "unable to save diagnostic snapshot"
-            );
-        }
-    }
-
     pub fn load_bootstrap(&self) -> Result<BootstrapState, ApplicationError> {
         let settings = self.get_settings()?;
         let active_week = self.resolve_active_week(&settings)?;
         Ok(BootstrapState {
-            theme: settings_to_view(&settings).theme,
-            overtime_threshold_minutes: settings.overtime_threshold.0,
             active_week,
-            config_checksum: self.runtime_config.config_checksum.clone(),
-            version: self.runtime_config.version.clone(),
         })
-    }
-
-    pub fn get_active_week(&self) -> Result<WeekSheetView, ApplicationError> {
-        let settings = self.get_settings()?;
-        self.resolve_active_week(&settings)
     }
 
     pub fn save_week(&self, input: SaveWeekInput) -> Result<WeekSheetView, ApplicationError> {
@@ -222,37 +170,14 @@ impl ApplicationService {
         Ok(settings_to_view(&settings))
     }
 
-    pub fn set_theme(&self, input: ThemeInput) -> Result<ThemeView, ApplicationError> {
+    pub fn set_theme(&self, theme: String) -> Result<(), ApplicationError> {
         let mut settings = self.get_settings()?;
-        settings.theme = match input.theme.as_str() {
+        settings.theme = match theme.as_str() {
             "light" => ThemePreference::Light,
             "dark" => ThemePreference::Dark,
             _ => return Err(ApplicationError::Config(ConfigError::Invalid)),
         };
-        self.save_settings_and_cache(&settings)?;
-        Ok(ThemeView { theme: input.theme })
-    }
-
-    pub fn get_app_status(&self) -> Result<AppStatusView, ApplicationError> {
-        let metadata = self.week_repository.metadata()?;
-        let settings = self.get_settings()?;
-        let storage_status = match self.week_repository.ping() {
-            Ok(()) => "healthy",
-            Err(error) => {
-                self.capture_error("get_app_status.ping", &ApplicationError::Storage(error));
-                "degraded"
-            }
-        };
-        let latest_snapshot = self.diagnostics_store.latest_snapshot_id()?;
-
-        Ok(AppStatusView {
-            version: self.runtime_config.version.clone(),
-            config_checksum: self.runtime_config.config_checksum.clone(),
-            storage_status: storage_status.to_string(),
-            latest_migration_status: metadata.latest_migration_status,
-            active_week_id: settings.active_week_id.map(|item| item.0),
-            latest_diagnostic_snapshot_id: latest_snapshot,
-        })
+        self.save_settings_and_cache(&settings)
     }
 
     /// Récupère les données analytiques agrégées
@@ -269,108 +194,6 @@ impl ApplicationService {
             weekly_trends,
             monthly_stats,
             total_weeks,
-        })
-    }
-
-    /// Export toutes les données de l'utilisateur (paramètres + semaines)
-    pub fn export_data(&self) -> Result<String, ApplicationError> {
-        let settings = self.get_settings()?;
-        let settings_view = settings_to_view(&settings);
-
-        let weeks = self.week_repository.list_weeks()?;
-        let weeks_view = weeks
-            .iter()
-            .map(week_to_view)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ApplicationError::from)?;
-
-        let export = DataExport {
-            version: self.runtime_config.version.clone(),
-            exported_at: Utc::now().to_rfc3339(),
-            settings: settings_view,
-            weeks: weeks_view,
-        };
-
-        serde_json::to_string_pretty(&export)
-            .map_err(|error| ApplicationError::Config(ConfigError::Serialization {
-                details: error.to_string(),
-            }))
-    }
-
-    /// Import des données utilisateur (paramètres + semaines)
-    pub fn import_data(&self, json_data: String) -> Result<BootstrapState, ApplicationError> {
-        let import: DataExport = serde_json::from_str(&json_data).map_err(|_| {
-            ApplicationError::Config(ConfigError::Serialization {
-                details: "Format de fichier invalide".to_string(),
-            })
-        })?;
-
-        // Importer les paramètres
-        let settings = self.get_settings()?;
-
-        // Mettre à jour les paramètres depuis l'import
-        let mut updated_settings = settings.clone();
-        updated_settings.overtime_threshold =
-            OvertimeThresholdMinutes::new(import.settings.overtime_threshold_minutes)?;
-        updated_settings.theme = match import.settings.theme.as_str() {
-            "light" => ThemePreference::Light,
-            "dark" => ThemePreference::Dark,
-            _ => return Err(ApplicationError::Config(ConfigError::Invalid)),
-        };
-        updated_settings.configured_days = import
-            .settings
-            .configured_days
-            .into_iter()
-            .map(|day| -> Result<ConfiguredDay, ValidationError> {
-                Ok(ConfiguredDay {
-                    day_id: DayId(day.day_id),
-                    label: DayLabel::parse(DayId(day.day_id), &day.label)?,
-                    enabled: day.enabled,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Importer les valeurs par défaut
-        updated_settings.default_work_interval = DefaultWorkInterval {
-            start: TimeOfDay::parse(&import.settings.default_start)?,
-            end: TimeOfDay::parse(&import.settings.default_end)?,
-        };
-        updated_settings.default_break_minutes = DefaultBreakMinutes(BreakMinutes::parse(&import.settings.default_break)?.0);
-
-        self.save_settings_and_cache(&updated_settings)?;
-
-        // Importer les semaines
-        for week_view in import.weeks {
-            let week = self.parse_week_input(SaveWeekInput {
-                week_id: week_view.week_id.clone(),
-                week_start: week_view.week_start.clone(),
-                overtime_threshold_minutes: week_view.overtime_threshold_minutes,
-                entries: week_view
-                    .entries
-                    .into_iter()
-                    .map(|entry| SaveWeekDayEntryInput {
-                        day_id: entry.day_id,
-                        label: entry.label,
-                        enabled: entry.enabled,
-                        start: entry.start,
-                        end: entry.end,
-                        break_time: entry.break_time,
-                    })
-                    .collect(),
-            })?;
-
-            // Sauvegarder ou mettre à jour la semaine
-            self.week_repository.save_week(&week)?;
-        }
-
-        // Retourner l'état bootstrap pour rafraîchir l'interface
-        let active_week = self.resolve_active_week(&updated_settings)?;
-        Ok(BootstrapState {
-            theme: import.settings.theme,
-            overtime_threshold_minutes: import.settings.overtime_threshold_minutes,
-            active_week,
-            config_checksum: self.runtime_config.config_checksum.clone(),
-            version: self.runtime_config.version.clone(),
         })
     }
 
