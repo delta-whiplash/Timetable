@@ -4,7 +4,7 @@ pub mod infrastructure;
 
 #[cfg(feature = "desktop")]
 mod desktop {
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::{fs, path::PathBuf, sync::Arc, sync::mpsc};
 
     use tauri::{Manager, State};
 
@@ -64,6 +64,47 @@ mod desktop {
     tauri_command!(set_theme, (), set_theme, theme: String);
     tauri_command!(get_analytics, AnalyticsDataView, get_analytics);
 
+    #[tauri::command]
+    fn export_week(
+        app: tauri::AppHandle,
+        state: State<'_, SharedState>,
+        week_start: String,
+    ) -> Result<Option<String>, PublicError> {
+        use tauri_plugin_dialog::DialogExt;
+
+        let exported = state
+            .service
+            .export_week(week_start)
+            .map_err(|error| to_public_error("export_week", error))?;
+
+        let (tx, rx) = mpsc::channel();
+        app.dialog()
+            .file()
+            .set_file_name(&exported.file_name)
+            .add_filter("Classeur Excel", &["xlsx"])
+            .save_file(move |path| {
+                let _ = tx.send(path);
+            });
+
+        let picked = rx.recv().map_err(|_| PublicError {
+            message: "dialogue d'enregistrement interrompu".to_string(),
+        })?;
+
+        let Some(file_path) = picked else {
+            return Ok(None);
+        };
+
+        let path = file_path.into_path().map_err(|error| PublicError {
+            message: format!("chemin invalide: {error:?}"),
+        })?;
+
+        fs::write(&path, &exported.bytes).map_err(|error| PublicError {
+            message: format!("écriture impossible: {error}"),
+        })?;
+
+        Ok(Some(path.to_string_lossy().into_owned()))
+    }
+
     fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         let app_data_dir = app
             .path()
@@ -100,6 +141,7 @@ mod desktop {
                 });
                 Ok(())
             })
+            .plugin(tauri_plugin_dialog::init())
             .invoke_handler(tauri::generate_handler![
                 load_bootstrap,
                 save_week,
@@ -109,7 +151,8 @@ mod desktop {
                 load_settings,
                 save_settings,
                 set_theme,
-                get_analytics
+                get_analytics,
+                export_week
             ])
             .run(tauri::generate_context!())
             .expect("tauri application failed to run");
