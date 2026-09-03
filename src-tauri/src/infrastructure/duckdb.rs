@@ -36,7 +36,7 @@ fn parse_interval(start_minutes: Option<u16>, end_minutes: Option<u16>) -> Optio
 /// Stockage DuckDB : semaines, jours et paramètres de l'application.
 #[derive(Clone)]
 pub struct DuckDb {
-    database_path: PathBuf,
+    pub database_path: PathBuf,
 }
 
 impl DuckDb {
@@ -423,19 +423,23 @@ impl DuckDb {
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 de.day_id,
-                de.label,
-                COUNT(*) as entry_count,
+                COUNT(CASE WHEN de.enabled = 1
+                    AND de.start_minutes IS NOT NULL
+                    AND de.end_minutes IS NOT NULL
+                    AND de.end_minutes > de.start_minutes
+                THEN 1 END) as worked_days,
                 COALESCE(SUM(
                     CASE
                         WHEN de.enabled = 1
                             AND de.start_minutes IS NOT NULL
                             AND de.end_minutes IS NOT NULL
-                        THEN de.end_minutes - de.start_minutes - de.break_minutes
+                            AND de.end_minutes > de.start_minutes
+                        THEN GREATEST(0, de.end_minutes - de.start_minutes - COALESCE(de.break_minutes, 0))
                         ELSE 0
                     END
                 ), 0) as total_minutes
             FROM day_entries de
-            GROUP BY de.day_id, de.label
+            GROUP BY de.day_id
             ORDER BY de.day_id ASC",
         ))?;
 
@@ -446,18 +450,19 @@ impl DuckDb {
 
         while let Some(row) = map_storage_error(rows.next())? {
             let day_index: u8 = map_storage_error(row.get(0))?;
-            let day_name: String = map_storage_error(row.get(1))?;
-            let entry_count: i64 = map_storage_error(row.get(2))?;
-            let total_minutes: i64 = map_storage_error(row.get(3))?;
+            let worked_days: i64 = map_storage_error(row.get(1))?;
+            let total_minutes: i64 = map_storage_error(row.get(2))?;
 
-            let average_minutes = if entry_count > 0 {
-                (total_minutes / entry_count).max(0) as u32
+            let worked_days = worked_days.max(0) as u32;
+            let total_minutes = total_minutes.max(0) as u32;
+            let average_minutes = if worked_days > 0 {
+                total_minutes / worked_days
             } else {
                 0
             };
 
             stats.push(DayOfWeekStats {
-                day_name: day_names.get(day_index as usize).copied().unwrap_or(day_name.as_str()).to_string(),
+                day_name: day_names.get(day_index as usize).copied().unwrap_or("Inconnu").to_string(),
                 average_minutes,
             });
         }
@@ -747,5 +752,148 @@ mod balance_tests {
 
         let balance = store.get_cumulative_balance(&week.week_start);
         assert!(balance.is_err(), "le solde doit échouer proprement, pas mentir, reçu {balance:?}");
+    }
+}
+
+
+#[cfg(test)]
+mod analytics_consistency_tests {
+    use tempfile::tempdir;
+
+    use crate::{
+        domain::{
+            logic::{default_entries, default_settings},
+            types::{
+                BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes,
+                TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
+            },
+        },
+        infrastructure::duckdb::DuckDb,
+    };
+
+    /// Remplace le lundi des entrées par défaut par un jour custom.
+    /// Les autres 6 jours restent 08:00-18:00/60min (valides).
+    fn week_with(monday: DayEntry, week_start: &str) -> WeekSheet {
+        let mut entries = default_entries(&default_settings());
+        entries[0] = monday;
+        WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::parse(week_start).expect("date"),
+            entries,
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        }
+    }
+
+    /// Lundi travaillé : start-end-break valides, 9h00 par défaut.
+    fn active_monday() -> DayEntry {
+        DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: Some(WorkInterval {
+                start: TimeOfDay(8 * 60),
+                end: TimeOfDay(17 * 60),
+            }),
+            break_minutes: BreakMinutes(0),
+            enabled: true,
+        }
+    }
+
+    /// Lundi désactivé : intervalle présent mais compte pour 0 min en base.
+    fn disabled_monday() -> DayEntry {
+        DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: None,
+            break_minutes: BreakMinutes(0),
+            enabled: false,
+        }
+    }
+
+    #[test]
+    fn average_per_day_ignores_disabled_days() {
+        // 10 semaines : 8 lundis actifs (540 min chacun), 2 lundis désactivés.
+        // Moyenne attendue : 8 * 540 / 8 jours travailles = 540 min/jour.
+        // Avant : COUNT(*) divise par 10 -> moyenne artificiellement basse (432).
+        let dir = tempdir().expect("dir");
+        let store = DuckDb::new(dir.path().join("avg.duckdb"));
+        store.migrate().expect("migrations");
+
+        // 10 dates de lundi consécutives (2030-01-07 à 2030-03-11)
+        let dates = [
+            "2030-01-07", "2030-01-14", "2030-01-21", "2030-01-28", "2030-02-04",
+            "2030-02-11", "2030-02-18", "2030-02-25", "2030-03-04", "2030-03-11",
+        ];
+
+        for (i, date) in dates.iter().enumerate() {
+            let monday = if i < 8 { active_monday() } else { disabled_monday() };
+            store.save_week(&week_with(monday, date)).expect("save");
+        }
+
+        let stats = store.get_day_of_week_stats().expect("stats");
+        assert_eq!(stats.len(), 7, "un groupe par day_id (0-6)");
+        
+        let lundi = stats.iter().find(|s| s.day_name == "Lundi").expect("lundi");
+        assert_eq!(
+            lundi.average_minutes, 540,
+            "moyenne calculee sur les jours travailles uniquement, pas tous les jours enregistres"
+        );
+    }
+
+    #[test]
+    fn renamed_day_merges_into_single_bar() {
+        // Renommer "Lundi" en "Lundi pro" entre deux semaines ne doit pas
+        // creer deux barres distinctes dans les stats.
+        let dir = tempdir().expect("dir");
+        let store = DuckDb::new(dir.path().join("rename.duckdb"));
+        store.migrate().expect("migrations");
+
+        let mut day_old = active_monday();
+        day_old.label = DayLabel("Lundi".to_string());
+
+        let mut day_new = active_monday();
+        day_new.label = DayLabel("Lundi pro".to_string());
+
+        store.save_week(&week_with(day_old, "2030-01-07")).expect("old");
+        store.save_week(&week_with(day_new, "2030-01-14")).expect("new");
+
+        let stats = store.get_day_of_week_stats().expect("stats");
+        assert_eq!(stats.len(), 7, "7 groupes (un par day_id), pas 8");
+        
+        // Vérifier qu'il n'y a qu'un seul groupe pour le lundi (day_id=0)
+        let lundi_groups: Vec<_> = stats.iter().filter(|s| s.day_name == "Lundi").collect();
+        assert_eq!(lundi_groups.len(), 1, "groupe par day_id, pas par (day_id, label)");
+    }
+
+    #[test]
+    fn negative_daily_minutes_are_clamped_to_zero() {
+        // Une ligne corrompue (end < start) en base ne doit PAS faire
+        // chuter la moyenne en dessous de 0.
+        let dir = tempdir().expect("dir");
+        let store = DuckDb::new(dir.path().join("neg.duckdb"));
+        store.migrate().expect("migrations");
+
+        let week = week_with(active_monday(), "2030-01-07");
+        store.save_week(&week).expect("save");
+        let week_id = week.week_id.clone();
+
+        // Corrompre directement le lundi : swap start/end (fin < debut).
+        {
+            let conn = duckdb::Connection::open(&store.database_path).expect("open");
+            conn.execute(
+                "UPDATE day_entries SET start_minutes = 17*60, end_minutes = 8*60
+                 WHERE week_id = ?1 AND day_id = 0",
+                duckdb::params![week_id.0],
+            )
+            .expect("corrupt");
+        } // conn drop -> fichier libere
+
+        let stats = store.get_day_of_week_stats().expect("stats");
+        assert_eq!(stats.len(), 7, "7 groupes");
+        
+        let lundi = stats.iter().find(|s| s.day_name == "Lundi").expect("lundi");
+        assert_eq!(
+            lundi.average_minutes, 0,
+            "minutes negatives clampées à 0, jamais propagees dans la moyenne"
+        );
     }
 }
