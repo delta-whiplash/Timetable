@@ -740,13 +740,12 @@ impl DuckDb {
     /// Récupère les données pour les courbes analytics (présence vs heures sup)
     /// Retourne les 12 dernières semaines avec numéro de semaine ISO
     pub fn get_weekly_curves(&self) -> Result<Vec<WeekAnalyticsPoint>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 w.week_start,
                 w.overtime_threshold_minutes,
-                w.travel_deduction_minutes,
                 COALESCE(SUM(
                     CASE
                         WHEN de.enabled = 1
@@ -762,7 +761,7 @@ impl DuckDb {
                 ), 0) as effective_minutes
             FROM weeks w
             LEFT JOIN day_entries de ON w.id = de.week_id
-            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes, w.travel_deduction_minutes
+            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes
             ORDER BY w.week_start DESC
             LIMIT 12",
         ))?;
@@ -1218,6 +1217,37 @@ mod analytics_consistency_tests {
             "minutes negatives clampées à 0, jamais propagees dans la moyenne"
         );
     }
+
+    /// Regression test: get_weekly_curves doit lire la bonne colonne effective_minutes.
+    /// Bug: l'index de colonne était incorrect (2 au lieu de 3), lisant travel_deduction_minutes
+    /// au lieu de effective_minutes.
+    #[test]
+    fn weekly_curves_reads_correct_effective_minutes_column() {
+        let dir = tempdir().expect("dir");
+        let store = DuckDb::new(dir.path().join("curves.duckdb"));
+        store.migrate().expect("migrations");
+
+        // Semaine avec entrées par défaut (5 jours 8h-18h, 1h pause = 9h/jour)
+        // Total = 5 × 9h = 45h = 2700min
+        // threshold = 2100min (35h), travel_deduction = 30min (valeur par défaut)
+        // consumed_overtime = 2700 - 2100 = 600min
+        store.save_week(&week_with(active_monday(), "2030-01-07")).expect("save");
+
+        let curves = store.get_weekly_curves().expect("curves");
+        assert_eq!(curves.len(), 1, "une semaine en base");
+
+        let point = &curves[0];
+        // Avant le fix: effective_minutes = 30 (valeur de travel_deduction_minutes)
+        // Après le fix: effective_minutes = 2700 (vraies minutes effectives de la semaine)
+        assert_eq!(
+            point.effective_minutes, 2700,
+            "effective_minutes doit être 2700 (45h), pas 30 (bug: lecture de travel_deduction_minutes)"
+        );
+        assert_eq!(
+            point.consumed_overtime_minutes, 600,
+            "heures sup consommées = 2700 - 2100 = 600min"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1228,7 +1258,7 @@ mod balance_sql_equivalence_tests {
     use crate::{
         domain::{
             logic::{default_entries, default_settings},
-            types::{BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval},
+            types::{BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -1264,6 +1294,7 @@ mod balance_sql_equivalence_tests {
             week_start: WeekStartDate::parse(week_start).expect("date"),
             entries,
             overtime_threshold: OvertimeThresholdMinutes(2100),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
             updated_at: String::new(),
         }
     }
@@ -1405,6 +1436,7 @@ mod balance_sql_equivalence_tests {
                 week_start: WeekStartDate::parse(&week_start).expect("date"),
                 entries: default_entries(&default_settings()),
                 overtime_threshold: OvertimeThresholdMinutes(if i % 2 == 0 { 2100 } else { 1950 }),
+                travel_deduction_minutes: TravelDeductionMinutes::default(),
                 updated_at: String::new(),
             };
             let total = i32::from(
