@@ -19,7 +19,7 @@ export interface WeekSummaryView {
 }
 
 export interface WeekSheetView {
-  weekId: string;
+  weekId: string | null;
   weekStart: string;
   entries: DayEntryView[];
   overtimeThresholdMinutes: number;
@@ -66,7 +66,7 @@ export interface SaveWeekDayEntryInput {
 }
 
 export interface SaveWeekInput {
-  weekId: string;
+  weekId: string | null;
   weekStart: string;
   overtimeThresholdMinutes: number;
   entries: SaveWeekDayEntryInput[];

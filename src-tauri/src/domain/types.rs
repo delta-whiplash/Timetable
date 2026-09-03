@@ -155,7 +155,7 @@ pub struct ConfiguredDay {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeekSheet {
-    pub week_id: WeekId,
+    pub week_id: Option<WeekId>,
     pub week_start: WeekStartDate,
     pub entries: Vec<DayEntry>,
     pub overtime_threshold: OvertimeThresholdMinutes,

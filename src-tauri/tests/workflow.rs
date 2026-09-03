@@ -137,7 +137,7 @@ fn delete_week_is_transactional() {
 
     // Supprimer
     service
-        .delete_week(DeleteWeekInput { week_id: week.week_id.0.clone() })
+        .delete_week(DeleteWeekInput { week_id: week.week_id.expect("persisted week must have id").0.clone() })
         .expect("delete");
 
     // Vérifier qu'il n'y a ni semaine ni day_entries résiduels
@@ -173,7 +173,7 @@ fn list_weeks_returns_real_updated_at() {
     // Créer et sauvegarder une semaine
     let view = service
         .save_week(SaveWeekInput {
-            week_id: "test-week".to_string(),
+            week_id: Some("test-week".to_string()),
             week_start: "2030-05-06".to_string(),
             overtime_threshold_minutes: 2100,
             entries: vec![SaveWeekDayEntryInput {
@@ -221,7 +221,7 @@ fn save_week_returns_fresh_balance() {
     // Sauvegarder une semaine avec 10h de travail (seuil 35h = -25h)
     let view = service
         .save_week(SaveWeekInput {
-            week_id: "balance-test".to_string(),
+            week_id: Some("balance-test".to_string()),
             week_start: "2030-06-03".to_string(),
             overtime_threshold_minutes: 2100,
             entries: vec![SaveWeekDayEntryInput {
@@ -258,7 +258,7 @@ fn resolve_active_week_falls_back_on_invalid_week() {
     // Sauvegarder une semaine
     let view = service
         .save_week(SaveWeekInput {
-            week_id: "will-be-corrupt".to_string(),
+            week_id: Some("will-be-corrupt".to_string()),
             week_start: "2030-07-01".to_string(),
             overtime_threshold_minutes: 2100,
             entries: vec![SaveWeekDayEntryInput {
@@ -461,6 +461,7 @@ fn week_navigation_does_not_persist_template() {
 
     // Naviguer vers une semaine jamais saisie ne doit RIEN écrire en base :
     // sinon le solde cumulé compte des heures template jamais travaillées.
+    // Issue #1 : la semaine non sauvegardée n'a pas encore d'ID (None).
     let view = service
         .create_or_switch_week(WeekSelectorInput {
             week_start: "2030-01-07".to_string(),
@@ -469,6 +470,12 @@ fn week_navigation_does_not_persist_template() {
 
     // La vue retournée contient bien les 7 jours pré-remplis (template en mémoire)
     assert_eq!(view.entries.len(), 7);
+
+    // Issue #1 : week_id doit être None tant que la semaine n'est pas sauvegardée
+    assert!(
+        view.week_id.is_none(),
+        "une semaine non sauvegardée ne doit pas avoir d'ID"
+    );
 
     // Mais aucune semaine n'est persistée tant que l'utilisateur n'a pas sauvegardé
     assert!(
@@ -486,10 +493,10 @@ fn week_navigation_does_not_persist_template() {
         0
     );
 
-    // Après un save explicite, la semaine existe et le solde reflète les heures saisies
-    service
+    // Après un save explicite avec week_id: None, la semaine est créée avec un ID généré
+    let saved = service
         .save_week(SaveWeekInput {
-            week_id: view.week_id,
+            week_id: None,
             week_start: "2030-01-07".to_string(),
             overtime_threshold_minutes: 35 * 60,
             entries: vec![SaveWeekDayEntryInput {
@@ -502,6 +509,12 @@ fn week_navigation_does_not_persist_template() {
             }],
         })
         .expect("explicit save");
+
+    // Issue #1 : après sauvegarde, la semaine a maintenant un ID
+    assert!(
+        saved.week_id.is_some(),
+        "la semaine sauvegardée doit avoir un ID"
+    );
 
     assert!(
         store
@@ -520,7 +533,7 @@ fn duplicate_week_start_fails_at_db_level() {
     store.ensure_default_settings().expect("default settings");
 
     let week = WeekSheet {
-        week_id: WeekId("premiere".to_string()),
+        week_id: Some(WeekId("premiere".to_string())),
         week_start: WeekStartDate::parse("2030-02-04").expect("date"),
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
@@ -531,7 +544,7 @@ fn duplicate_week_start_fails_at_db_level() {
     // Deuxième semaine, id différent, même week_start : la base doit refuser
     // (sinon le solde cumulé compte deux fois les mêmes heures)
     let doublon = WeekSheet {
-        week_id: WeekId("deuxieme".to_string()),
+        week_id: Some(WeekId("deuxieme".to_string())),
         week_start: WeekStartDate::parse("2030-02-04").expect("date"),
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
@@ -559,7 +572,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
     // Sauvegarde normale : id A
     service
         .save_week(SaveWeekInput {
-            week_id: "id-A".to_string(),
+            week_id: Some("id-A".to_string()),
             week_start: "2030-03-04".to_string(),
             overtime_threshold_minutes: 35 * 60,
             entries: vec![SaveWeekDayEntryInput {
@@ -577,7 +590,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
     // doit ADOPTER la ligne existante au lieu d'erreur ou de créer un doublon
     let view = service
         .save_week(SaveWeekInput {
-            week_id: "id-B".to_string(),
+            week_id: Some("id-B".to_string()),
             week_start: "2030-03-04".to_string(),
             overtime_threshold_minutes: 35 * 60,
             entries: vec![SaveWeekDayEntryInput {
@@ -591,7 +604,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
         })
         .expect("save B adopte la semaine existante");
 
-    assert_eq!(view.week_id, "id-A");
+    assert_eq!(view.week_id, Some("id-A".to_string()));
     let weeks = store.list_weeks().expect("list");
     assert_eq!(weeks.len(), 1, "une seule semaine, pas de doublon");
 }

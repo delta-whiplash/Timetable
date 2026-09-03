@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn computes_week_summary() {
         let sheet = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: Some(WeekId::new()),
             week_start: WeekStartDate::today(),
             entries: vec![
                 build_day(0, 480, 1080, 60),

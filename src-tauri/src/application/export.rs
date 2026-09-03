@@ -143,7 +143,13 @@ pub fn build_export_sheet(
                 "Application".to_string(),
                 format!("Timetable Desktop v{}", env!("CARGO_PKG_VERSION")),
             ),
-            ("Identifiant semaine".to_string(), week.week_id.0.clone()),
+            (
+                "Identifiant semaine".to_string(),
+                week.week_id
+                    .as_ref()
+                    .map(|id| id.0.clone())
+                    .unwrap_or_else(|| "Non sauvegardée".to_string()),
+            ),
             (
                 "Seuil heures supplémentaires".to_string(),
                 minutes_to_label(week.overtime_threshold.0),
@@ -198,7 +204,7 @@ mod tests {
     fn fixture_week() -> WeekSheet {
         let h = |hh: u16, mm: u16| hh * 60 + mm;
         WeekSheet {
-            week_id: WeekId("fixture".to_string()),
+            week_id: Some(WeekId("fixture".to_string())),
             week_start: WeekStartDate::parse("2026-09-07").expect("lundi valide"),
             entries: vec![
                 day(0, "Lundi", Some((h(8, 0), h(18, 0))), 60, true),

@@ -22,7 +22,7 @@ pub struct SaveWeekDayEntryInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveWeekInput {
-    pub week_id: String,
+    pub week_id: Option<String>,
     pub week_start: String,
     pub overtime_threshold_minutes: u16,
     pub entries: Vec<SaveWeekDayEntryInput>,
@@ -83,7 +83,7 @@ pub struct WeekSummaryView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeekSheetView {
-    pub week_id: String,
+    pub week_id: Option<String>,
     pub week_start: String,
     pub entries: Vec<DayEntryView>,
     pub overtime_threshold_minutes: u16,
@@ -193,7 +193,7 @@ pub fn configured_day_to_view(day: &ConfiguredDay) -> ConfiguredDayView {
 
 pub fn week_to_view(
     week: &WeekSheet,
-    cumulative_balance_minutes: i32,
+    cumulative_balance_minutes: Option<i32>,
 ) -> Result<WeekSheetView, crate::domain::errors::ValidationError> {
     let summary = summarize_week(week)?;
     let entries = week
@@ -215,17 +215,17 @@ pub fn week_to_view(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(WeekSheetView {
-        week_id: week.week_id.0.clone(),
+        week_id: week.week_id.clone().map(|id| id.0),
         week_start: week.week_start.as_string(),
         entries,
         overtime_threshold_minutes: week.overtime_threshold.0,
         summary: WeekSummaryView {
             total_label: minutes_to_label(summary.total_minutes),
             percentage: threshold_percentage(summary.total_minutes, week.overtime_threshold.0),
-            cumulative_balance_minutes,
-            cumulative_balance_label: crate::domain::logic::signed_minutes_to_label(
-                cumulative_balance_minutes,
-            ),
+            cumulative_balance_minutes: cumulative_balance_minutes.unwrap_or(0),
+            cumulative_balance_label: cumulative_balance_minutes
+                .map(|balance| crate::domain::logic::signed_minutes_to_label(balance))
+                .unwrap_or_else(|| "--".to_string()),
         },
     })
 }
