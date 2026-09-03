@@ -135,12 +135,29 @@ fn exports_week_as_xlsx() {
 
     let service = ApplicationService::new(store);
 
-    // Crée la semaine du 07/09/2026 avec les entrées par défaut (5 jours actifs)
-    service
+    // Navigue vers la semaine puis la sauvegarde explicitement
+    // (l'export ne concerne que les semaines réellement saisies)
+    let view = service
         .create_or_switch_week(WeekSelectorInput {
             week_start: "2026-09-07".to_string(),
         })
         .expect("create week");
+
+    service
+        .save_week(SaveWeekInput {
+            week_id: view.week_id,
+            week_start: "2026-09-07".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            entries: vec![SaveWeekDayEntryInput {
+                day_id: 0,
+                label: "Lundi".to_string(),
+                enabled: true,
+                start: Some("08:00".to_string()),
+                end: Some("18:00".to_string()),
+                break_time: "01:00".to_string(),
+            }],
+        })
+        .expect("save week before export");
 
     let exported = service
         .export_week("2026-09-07".to_string())
@@ -156,4 +173,66 @@ fn exports_week_as_xlsx() {
         missing,
         Err(ApplicationError::Storage(StorageError::EntityNotFound))
     ));
+}
+
+#[test]
+fn week_navigation_does_not_persist_template() {
+    let temp_dir = tempdir().expect("temp dir");
+    let store = Arc::new(DuckDb::new(temp_dir.path().join("nav.duckdb")));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+
+    let service = ApplicationService::new(store.clone());
+
+    // Naviguer vers une semaine jamais saisie ne doit RIEN écrire en base :
+    // sinon le solde cumulé compte des heures template jamais travaillées.
+    let view = service
+        .create_or_switch_week(WeekSelectorInput {
+            week_start: "2030-01-07".to_string(),
+        })
+        .expect("switch to future week");
+
+    // La vue retournée contient bien les 7 jours pré-remplis (template en mémoire)
+    assert_eq!(view.entries.len(), 7);
+
+    // Mais aucune semaine n'est persistée tant que l'utilisateur n'a pas sauvegardé
+    assert!(
+        store
+            .get_week_by_start(&WeekStartDate::parse("2030-01-07").expect("date"))
+            .expect("query")
+            .is_none()
+    );
+
+    // Et le solde cumulé ne compte pas d'heures fantômes
+    assert_eq!(
+        store
+            .get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"))
+            .expect("balance"),
+        0
+    );
+
+    // Après un save explicite, la semaine existe et le solde reflète les heures saisies
+    service
+        .save_week(SaveWeekInput {
+            week_id: view.week_id,
+            week_start: "2030-01-07".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            entries: vec![SaveWeekDayEntryInput {
+                day_id: 0,
+                label: "Lundi".to_string(),
+                enabled: true,
+                start: Some("08:00".to_string()),
+                end: Some("18:00".to_string()),
+                break_time: "01:00".to_string(),
+            }],
+        })
+        .expect("explicit save");
+
+    assert!(
+        store
+            .get_week_by_start(&WeekStartDate::parse("2030-01-07").expect("date"))
+            .expect("query")
+            .is_some()
+    );
 }

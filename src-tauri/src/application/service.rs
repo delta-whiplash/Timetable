@@ -210,13 +210,15 @@ impl ApplicationService {
             return Ok(week);
         }
 
+        // Semaine jamais saisie : template en mémoire uniquement, rien en base.
+        // Sinon le solde cumulé compterait 5 x 9h jamais travaillées.
+        // La semaine est persistée au premier save_week explicite (upsert).
         let week = WeekSheet {
             week_id: WeekId::new(),
             week_start,
             entries: default_entries(&settings.configured_days),
             overtime_threshold: settings.overtime_threshold,
         };
-        self.store.save_week(&week)?;
 
         let mut next_settings = settings.clone();
         next_settings.active_week_id = Some(week.week_id.clone());
