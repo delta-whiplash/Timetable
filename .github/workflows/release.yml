@@ -75,6 +75,12 @@ jobs:
           name: windows-msi
           path: src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: warn
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-exe
+          path: src-tauri/target/release/timetable-desktop.exe
+          if-no-files-found: warn
 
   build-linux:
     name: Build Linux
@@ -141,12 +147,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build Tauri app (universal)
         run: |
-          pnpm run tauri:build -- --target universal-apple-darwin
+          pnpm run tauri:build -- --target universal2-apple-darwin
       - name: Upload DMG
         uses: actions/upload-artifact@v7.0.1
         with:
           name: macos-dmg
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          path: src-tauri/target/universal2-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: warn
 
   release:
@@ -168,6 +174,7 @@ jobs:
           files: |
             artifacts/windows-nsis/*.exe
             artifacts/windows-msi/*.msi
+            artifacts/windows-exe/*.exe
             artifacts/linux-appimage/*.AppImage
             artifacts/macos-dmg/*.dmg
           draft: false
