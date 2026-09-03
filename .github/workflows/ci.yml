@@ -11,43 +11,33 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v2.1.0
         with:
-          node-version: "22"
-          cache: "npm"
+          version: 11
+          cache: true
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "24"
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Check Svelte
-        run: npm run check
+        run: pnpm run check
 
   backend-core:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and git
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-
+          workspaces: src-tauri
 
       - name: Test backend core without desktop runtime
         working-directory: src-tauri
@@ -56,35 +46,25 @@ jobs:
   windows-desktop:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v2.1.0
         with:
-          node-version: "22"
-          cache: "npm"
+          version: 11
+          cache: true
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "24"
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and git
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-
+          workspaces: src-tauri
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Check desktop build wiring
         working-directory: src-tauri
