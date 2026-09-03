@@ -175,7 +175,8 @@ function createAppStore() {
     changeTheme,
     removeWeek,
     loadAnalytics,
-    triggerExport
+    triggerExport,
+    refreshHistory: refreshHistoryOnly
   };
 }
 

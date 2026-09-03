@@ -99,6 +99,11 @@
 
   function setTab(tab: typeof activeTab) {
     flushPendingChanges();
+    // Les saves faits hors historique ne rafraîchissent pas list_weeks :
+    // recharger à l'ouverture de l'onglet pour ne pas montrer un total périmé.
+    if (tab === "history") {
+      void appStore.refreshHistory();
+    }
     activeTab = tab;
   }
 

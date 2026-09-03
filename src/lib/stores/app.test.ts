@@ -186,3 +186,25 @@ describe("appStore.persistWeek", () => {
     unsubscribe();
   });
 });
+
+describe("appStore.refreshHistory", () => {
+  it("recharge l'historique sans toucher au reste (ouverture de l'onglet)", async () => {
+    vi.clearAllMocks();
+    mockedBootstrap.mockResolvedValue({ activeWeek: ACTIVE_WEEK });
+    const FRESH = [{ weekId: "w1", weekStart: "2026-08-31" }] as never;
+    mockedListWeeks.mockResolvedValue(FRESH);
+
+    await appStore.bootstrap();
+    mockedListWeeks.mockClear();
+
+    let history: unknown = null;
+    const unsubscribe = appStore.subscribe((state) => (history = state.history));
+
+    await appStore.refreshHistory();
+
+    expect(mockedListWeeks).toHaveBeenCalledTimes(1);
+    expect(history).toEqual(FRESH);
+
+    unsubscribe();
+  });
+});
