@@ -65,11 +65,12 @@ mod desktop {
     tauri_command!(get_analytics, AnalyticsDataView, get_analytics);
 
     #[tauri::command]
-    fn export_week(
+    async fn export_week(
         app: tauri::AppHandle,
-        state: State<'_, SharedState>,
+        state: tauri::State<'_, SharedState>,
         week_start: String,
     ) -> Result<Option<String>, PublicError> {
+        use tauri::async_runtime::spawn_blocking;
         use tauri_plugin_dialog::DialogExt;
 
         let exported = state
@@ -77,32 +78,43 @@ mod desktop {
             .export_week(week_start)
             .map_err(|error| to_public_error("export_week", error))?;
 
-        let (tx, rx) = mpsc::channel();
-        app.dialog()
-            .file()
-            .set_file_name(&exported.file_name)
-            .add_filter("Classeur Excel", &["xlsx"])
-            .save_file(move |path| {
-                let _ = tx.send(path);
-            });
+        // Le recv bloquant vit sur un thread dédié : le dialogue natif pompe
+        // la message loop du thread principal, une commande sync qui attend
+        // rx.recv() gèle l'app entière (freeze constaté en E2E).
+        let result = spawn_blocking(move || -> Result<Option<String>, PublicError> {
+            let (tx, rx) = mpsc::channel();
+            app.dialog()
+                .file()
+                .set_file_name(&exported.file_name)
+                .add_filter("Classeur Excel", &["xlsx"])
+                .save_file(move |path| {
+                    let _ = tx.send(path);
+                });
 
-        let picked = rx.recv().map_err(|_| PublicError {
-            message: "dialogue d'enregistrement interrompu".to_string(),
-        })?;
+            let picked = rx.recv().map_err(|_| PublicError {
+                message: "dialogue d'enregistrement interrompu".to_string(),
+            })?;
 
-        let Some(file_path) = picked else {
-            return Ok(None);
-        };
+            let Some(file_path) = picked else {
+                return Ok(None);
+            };
 
-        let path = file_path.into_path().map_err(|error| PublicError {
-            message: format!("chemin invalide: {error:?}"),
-        })?;
+            let path = file_path.into_path().map_err(|error| PublicError {
+                message: format!("chemin invalide: {error:?}"),
+            })?;
 
-        fs::write(&path, &exported.bytes).map_err(|error| PublicError {
-            message: format!("écriture impossible: {error}"),
-        })?;
+            fs::write(&path, &exported.bytes).map_err(|error| PublicError {
+                message: format!("écriture impossible: {error}"),
+            })?;
 
-        Ok(Some(path.to_string_lossy().into_owned()))
+            Ok(Some(path.to_string_lossy().into_owned()))
+        })
+        .await
+        .map_err(|error| PublicError {
+            message: format!("tâche d'export interrompue: {error}"),
+        })??;
+
+        Ok(result)
     }
 
     fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {

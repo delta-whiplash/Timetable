@@ -84,7 +84,16 @@ function createAppStore() {
     update((state) => ({ ...state, savingSettings: true, error: null }));
     try {
       const settings = await saveSettings(input);
-      update((state) => ({ ...state, settings, savingSettings: false }));
+      // Le backend peut avoir mis à jour le seuil de la semaine active :
+      // recharger la semaine, sinon la sidebar affiche des % / soldes
+      // calculés avec l'ancien seuil (divergence sidebar vs export).
+      const bootstrapState = await loadBootstrap();
+      update((state) => ({
+        ...state,
+        settings,
+        activeWeek: bootstrapState.activeWeek,
+        savingSettings: false
+      }));
     } catch (error) {
       update((state) => ({ ...state, savingSettings: false, error: toCommandError(error) }));
     }
