@@ -44,12 +44,18 @@ impl ApplicationService {
     }
 
     fn week_to_view_with_balance(&self, week: &WeekSheet) -> Result<WeekSheetView, ApplicationError> {
-        let balance = match self.store.get_cumulative_balance(&week.week_start) {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(week_start = %week.week_start.as_string(), ?error, "Failed to compute cumulative balance");
-                0
+        // Issue #1 : pas de solde cumulé si la semaine n'est pas persistée (week_id: None)
+        let balance = match &week.week_id {
+            Some(_) => {
+                match self.store.get_cumulative_balance(&week.week_start) {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        tracing::error!(week_start = %week.week_start.as_string(), ?error, "Failed to compute cumulative balance");
+                        Some(0)
+                    }
+                }
             }
+            None => None,
         };
         week_to_view(week, balance).map_err(ApplicationError::from)
     }
@@ -69,10 +75,15 @@ impl ApplicationService {
     pub fn save_week(&self, input: SaveWeekInput) -> Result<WeekSheetView, ApplicationError> {
         let mut week = self.parse_week_input(input)?;
 
+        // Issue #1 : générer un ID si week_id est None (nouvelle semaine)
+        if week.week_id.is_none() {
+            week.week_id = Some(WeekId::new());
+        }
+
         // Id obsolète (fenêtre périmée, double instance) : adopte la ligne
         // existante de la même semaine au lieu de violer l'index unique.
         if let Some(existing) = self.store.get_week_by_start(&week.week_start)? {
-            week.week_id = existing.week_id;
+            week.week_id = Some(existing.week_id.expect("persisted week must have id"));
         }
 
         // Valide la semaine avant écriture (fail-closed si invalide)
@@ -80,9 +91,9 @@ impl ApplicationService {
 
         self.store.save_week(&week)?;
         let mut settings = self.get_settings()?;
-        settings.active_week_id = Some(week.week_id.clone());
+        settings.active_week_id = week.week_id.clone();
         self.persist_settings(&settings)?;
-        info!(week_id = %week.week_id.0, "week saved");
+        info!(week_id = ?week.week_id, "week saved");
 
         // Construit la vue APRÈS sauvegarde pour avoir un solde cumulé frais
         let view = self.week_to_view_with_balance(&week)?;
@@ -105,7 +116,7 @@ impl ApplicationService {
             .map(|week| {
                 let summary = summarize_week(&week)?;
                 Ok(WeekListItem {
-                    week_id: week.week_id.0,
+                    week_id: week.week_id.expect("persisted week must have id").0,
                     week_start: week.week_start.as_string(),
                     total_minutes: summary.total_minutes,
                     total_label: minutes_to_label(summary.total_minutes),
@@ -224,25 +235,24 @@ impl ApplicationService {
     ) -> Result<WeekSheet, ApplicationError> {
         if let Some(week) = self.store.get_week_by_start(&week_start)? {
             let mut next_settings = settings.clone();
-            next_settings.active_week_id = Some(week.week_id.clone());
+            next_settings.active_week_id = Some(week.week_id.clone().expect("persisted week must have id"));
             self.persist_settings(&next_settings)?;
             return Ok(week);
         }
 
-        // Semaine jamais saisie : template en mémoire uniquement, rien en base.
-        // Sinon le solde cumulé compterait 5 x 9h jamais travaillées.
-        // La semaine est persistée au premier save_week explicite (upsert).
+        // Issue #1 : template en mémoire avec week_id: None, pas de persistance
+        // tant que l'utilisateur ne sauvegarde pas explicitement.
+        // Le solde cumulé affichera "--" jusqu'à la première sauvegarde.
         let week = WeekSheet {
-            week_id: WeekId::new(),
+            week_id: None,
             week_start,
             entries: default_entries(settings),
             overtime_threshold: settings.overtime_threshold,
             updated_at: String::new(),
         };
 
-        let mut next_settings = settings.clone();
-        next_settings.active_week_id = Some(week.week_id.clone());
-        self.persist_settings(&next_settings)?;
+        // Ne pas mettre à jour active_week_id tant que la semaine n'est pas sauvegardée
+        // (sinon une semaine vide deviendrait la semaine active par défaut)
         Ok(week)
     }
 
@@ -255,7 +265,7 @@ impl ApplicationService {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(WeekSheet {
-            week_id: WeekId(input.week_id),
+            week_id: input.week_id.map(WeekId),
             week_start: WeekStartDate::parse(&input.week_start)?,
             entries,
             overtime_threshold,
