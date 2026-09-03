@@ -313,27 +313,23 @@ impl DuckDb {
     }
 
     pub fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        let mut statement = map_storage_error(connection.prepare(
-            "SELECT COALESCE(SUM(
-                COALESCE(week_totals.total_minutes, 0) - w.overtime_threshold_minutes
-            ), 0)
-            FROM weeks w
-            LEFT JOIN (
-                SELECT week_id,
-                    SUM(CASE WHEN enabled = 1
-                        AND start_minutes IS NOT NULL
-                        AND end_minutes IS NOT NULL
-                    THEN end_minutes - start_minutes - break_minutes
-                    ELSE 0 END) as total_minutes
-                FROM day_entries
-                GROUP BY week_id
-            ) week_totals ON w.id = week_totals.week_id
-            WHERE w.week_start <= ?1",
-        ))?;
-        let balance: Result<i32, duckdb::Error> =
-            statement.query_row(params![up_to_week_start.as_string()], |row| row.get(0));
-        map_storage_error(balance)
+        // Calcul en Rust, source de vérité unique. Le SQL précédent
+        // additionnait silencieusement les deltas négatifs (si une ligne
+        // corrompue en base avait end < start, il mentait). La version
+        // Rust passe par summarize_week/validate_day : une ligne invalide
+        // fait échouer proprement le calcul.
+        let weeks = self.list_weeks()?;
+        let mut balance: i32 = 0;
+        for week in weeks {
+            if week.week_start.0 > up_to_week_start.0 {
+                continue;
+            }
+            let total = crate::domain::logic::summarize_week(&week)
+                .map_err(|_| StorageError::SerializationFailed)?
+                .total_minutes;
+            balance += i32::from(total) - i32::from(week.overtime_threshold.0);
+        }
+        Ok(balance)
     }
 
     pub fn ensure_default_settings(&self) -> Result<(), StorageError> {
@@ -668,5 +664,88 @@ mod tests {
         let summary2 = summarize_week(&week2).expect("summary2");
         let expected = (i32::from(summary1.total_minutes) - 2100) + (i32::from(summary2.total_minutes) - 2100);
         assert_eq!(balance, expected);
+    }
+}
+
+#[cfg(test)]
+mod balance_tests {
+    use duckdb::{params, Connection};
+    use tempfile::tempdir;
+
+    use crate::{
+        domain::{
+            logic::{default_entries, default_settings, summarize_week},
+            types::{OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
+        },
+        infrastructure::duckdb::DuckDb,
+    };
+
+    #[test]
+    fn balance_reflects_each_weeks_own_threshold() {
+        // Deux semaines de 2700 min avec des seuils différents :
+        // le solde doit être la somme des deltas hebdo (source unique Rust).
+        let temp_dir = tempdir().expect("temp dir");
+        let store = DuckDb::new(temp_dir.path().join("balance_mixed.duckdb"));
+        store.migrate().expect("migrations");
+
+        let week1 = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::parse("2030-01-07").expect("date"),
+            entries: default_entries(&default_settings()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        };
+        let week2 = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::parse("2030-01-14").expect("date"),
+            entries: default_entries(&default_settings()),
+            overtime_threshold: OvertimeThresholdMinutes(3000),
+        };
+        store.save_week(&week1).expect("save w1");
+        store.save_week(&week2).expect("save w2");
+
+        let total1 = i32::from(summarize_week(&week1).expect("s1").total_minutes);
+        let total2 = i32::from(summarize_week(&week2).expect("s2").total_minutes);
+        let expected = (total1 - 2100) + (total2 - 3000);
+
+        let balance = store
+            .get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"))
+            .expect("balance");
+        assert_eq!(balance, expected);
+    }
+
+    #[test]
+    fn balance_fails_closed_on_corrupt_stored_row() {
+        // Une ligne invalide en base (fin < début) doit produire une ERREUR
+        // visible, jamais un solde silencieusement faux. Avant : le SQL
+        // additionnait le négatif sans rien dire.
+        let temp_dir = tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("balance_corrupt.duckdb");
+        let store = DuckDb::new(db_path.clone());
+        store.migrate().expect("migrations");
+
+        let week = WeekSheet {
+            week_id: WeekId::new(),
+            week_start: WeekStartDate::parse("2030-01-07").expect("date"),
+            entries: default_entries(&default_settings()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+        };
+        store.save_week(&week).expect("save");
+
+        // Corrompre via une connexion indépendante puis la fermer pour libérer
+        // le fichier (DuckDB interdit les connexions concurrentes sur le même
+        // fichier dans un même process).
+        {
+            let connection = Connection::open(&db_path).expect("open");
+            connection
+                .execute(
+                    "UPDATE day_entries SET start_minutes = 1080, end_minutes = 480
+                     WHERE week_id = ?1 AND day_id = 0",
+                    params![week.week_id.0],
+                )
+                .expect("corrupt");
+        } // connection drop ici, fichier libéré
+
+        let balance = store.get_cumulative_balance(&week.week_start);
+        assert!(balance.is_err(), "le solde doit échouer proprement, pas mentir, reçu {balance:?}");
     }
 }
