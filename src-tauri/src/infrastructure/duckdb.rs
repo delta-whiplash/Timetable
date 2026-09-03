@@ -7,7 +7,7 @@ use chrono::Utc;
 use duckdb::{params, Connection};
 
 use crate::{
-    application::dto::{DayOfWeekStats, MonthlyStatsView, WeeklyTrendPoint},
+    application::dto::{DayOfWeekStats, MonthlyStatsView, WeekAnalyticsPoint, WeeklyTrendPoint},
     domain::{
         errors::StorageError,
         logic::{default_settings, minutes_to_label},
@@ -659,6 +659,77 @@ impl DuckDb {
         // Inverser pour avoir l'ordre chronologique
         stats.reverse();
         Ok(stats)
+    }
+
+    /// Récupère les données pour les courbes analytics (présence vs heures sup)
+    /// Retourne les 12 dernières semaines avec numéro de semaine ISO
+    pub fn get_weekly_curves(&self) -> Result<Vec<WeekAnalyticsPoint>, StorageError> {
+        let connection = open_connection(&self.database_path)?;
+
+        let mut statement = map_storage_error(connection.prepare(
+            "SELECT
+                w.week_start,
+                w.overtime_threshold_minutes,
+                COALESCE(SUM(
+                    CASE
+                        WHEN de.enabled = 1
+                            AND de.start_minutes IS NOT NULL
+                            AND de.end_minutes IS NOT NULL
+                        THEN GREATEST(0,
+                            de.end_minutes - de.start_minutes - de.break_minutes
+                            - 30 * COALESCE(de.has_departure_deduction, 0)
+                            - 30 * COALESCE(de.has_return_deduction, 0)
+                        )
+                        ELSE 0
+                    END
+                ), 0) as effective_minutes
+            FROM weeks w
+            LEFT JOIN day_entries de ON w.id = de.week_id
+            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes
+            ORDER BY w.week_start DESC
+            LIMIT 12",
+        ))?;
+
+        let mut rows = map_storage_error(statement.query([]))?;
+        let mut curves = Vec::new();
+
+        while let Some(row) = map_storage_error(rows.next())? {
+            let week_start: String = map_storage_error(row.get(0))?;
+            let overtime_threshold: i64 = map_storage_error(row.get(1))?;
+            let effective_minutes: i64 = map_storage_error(row.get(2))?;
+
+            let effective = effective_minutes.max(0) as u32;
+            let threshold = overtime_threshold.max(0) as u32;
+            
+            // Heures sup consommées = excès au-dessus du seuil
+            let consumed_overtime = effective.saturating_sub(threshold);
+            
+            // Calcul du numéro de semaine ISO à partir de la date
+            let week_number = Self::iso_week_number(&week_start);
+
+            curves.push(WeekAnalyticsPoint {
+                week_start,
+                week_number,
+                effective_minutes: effective,
+                consumed_overtime_minutes: consumed_overtime,
+            });
+        }
+
+        // Inverser pour avoir l'ordre chronologique (du plus ancien au plus récent)
+        curves.reverse();
+        Ok(curves)
+    }
+
+    /// Calcule le numéro de semaine ISO à partir d'une date (format YYYY-MM-DD)
+    fn iso_week_number(date_str: &str) -> u32 {
+        use chrono::Datelike;
+        
+        // Parse la date
+        let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+        
+        // Retourne le numéro de semaine ISO
+        date.iso_week().week()
     }
 }
 

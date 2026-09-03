@@ -124,6 +124,20 @@ pub struct BootstrapState {
     pub active_week: WeekSheetView,
 }
 
+/// Point de données pour les courbes analytics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeekAnalyticsPoint {
+    /// Date de début de la semaine (format ISO)
+    pub week_start: String,
+    /// Numéro de semaine ISO
+    pub week_number: u32,
+    /// Temps de présence effective (minutes réelles avec déductions)
+    pub effective_minutes: u32,
+    /// Heures sup consommées (excès au-dessus du seuil)
+    pub consumed_overtime_minutes: u32,
+}
+
 /// Vue principale des données analytiques
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +150,8 @@ pub struct AnalyticsDataView {
     pub monthly_stats: Vec<MonthlyStatsView>,
     /// Nombre total de semaines enregistrées
     pub total_weeks: u32,
+    /// Courbes comparatives pour les 12 dernières semaines
+    pub weekly_curves: Vec<WeekAnalyticsPoint>,
 }
 
 /// Statistiques pour un jour de la semaine spécifique

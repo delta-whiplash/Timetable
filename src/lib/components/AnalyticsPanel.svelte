@@ -9,8 +9,10 @@
 
   let dayChartEl: HTMLDivElement;
   let trendChartEl: HTMLDivElement;
+  let curvesChartEl: HTMLDivElement;
   let dayChart: ApexCharts | null = null;
   let trendChart: ApexCharts | null = null;
+  let curvesChart: ApexCharts | null = null;
 
   onMount(() => {
     void loadAnalytics();
@@ -18,6 +20,7 @@
     return () => {
       dayChart?.destroy();
       trendChart?.destroy();
+      curvesChart?.destroy();
     };
   });
 
@@ -34,14 +37,16 @@
   });
 
   // Action for chart element binding
-  function chartNode(node: HTMLDivElement, type: 'day' | 'trend') {
+  function chartNode(node: HTMLDivElement, type: 'day' | 'trend' | 'curves') {
     if (type === 'day') {
       dayChartEl = node;
-    } else {
+    } else if (type === 'trend') {
       trendChartEl = node;
+    } else {
+      curvesChartEl = node;
     }
-    // Try to initialize charts when both elements are ready
-    if (dayChartEl && trendChartEl && analytics && analytics.dayOfWeekStats.length > 0) {
+    // Try to initialize charts when all elements are ready
+    if (dayChartEl && trendChartEl && curvesChartEl && analytics && analytics.dayOfWeekStats.length > 0) {
       tick().then(() => {
         requestAnimationFrame(() => initCharts());
       });
@@ -166,6 +171,72 @@
 
     trendChart = new ApexCharts(trendChartEl, trendOptions);
     trendChart.render();
+
+    // Comparative Curves Chart (Effective vs Overtime)
+    if (analytics.weeklyCurves && analytics.weeklyCurves.length > 0) {
+      const curvesOptions = {
+        chart: {
+          type: "line" as const,
+          height: 320,
+          fontFamily: "Aptos, Bahnschrift, Segoe UI Variable, sans-serif",
+          toolbar: { show: false },
+          background: "transparent"
+        },
+        dataLabels: { enabled: false },
+        stroke: {
+          curve: "smooth" as const,
+          width: [3, 3]
+        },
+        xaxis: {
+          categories: analytics.weeklyCurves.map((d) => `S${d.weekNumber}`),
+          labels: { 
+            style: { colors: "#96a5bc" },
+            rotate: -45,
+            rotateAlways: false
+          },
+          title: {
+            text: "Semaine",
+            style: { color: "#96a5bc" }
+          }
+        },
+        yaxis: {
+          labels: {
+            style: { colors: "#96a5bc" },
+            formatter: (val: number) => `${Math.round(val / 60)}h`
+          }
+        },
+        tooltip: {
+          shared: true,
+          intersect: false,
+          y: {
+            formatter: (val: number) => {
+              const hours = Math.floor(val / 60);
+              const mins = val % 60;
+              return `${hours}h ${mins.toString().padStart(2, "0")}min`;
+            }
+          }
+        },
+        colors: ["#3b82f6", "#f97316"],
+        theme: { mode: "dark" as const },
+        legend: {
+          position: "bottom" as const,
+          labels: { colors: "#96a5bc" }
+        },
+        series: [
+          {
+            name: "Temps de présence",
+            data: analytics.weeklyCurves.map((d) => d.effectiveMinutes)
+          },
+          {
+            name: "Heures sup consommées",
+            data: analytics.weeklyCurves.map((d) => d.consumedOvertimeMinutes)
+          }
+        ]
+      };
+
+      curvesChart = new ApexCharts(curvesChartEl, curvesOptions);
+      curvesChart.render();
+    }
   }
 </script>
 
@@ -179,6 +250,12 @@
     <div class="analytics-loading">Chargement des analytiques...</div>
   {:else if analytics}
     <div class="analytics-grid">
+      <!-- Comparative Curves Chart -->
+      <div class="analytics-card analytics-card--wide">
+        <h3>Présence vs Heures sup (12 dernières semaines)</h3>
+        <div use:chartNode={'curves'}></div>
+      </div>
+
       <!-- Day of Week Chart -->
       <div class="analytics-card">
         <h3>Moyenne par jour de la semaine</h3>
@@ -238,6 +315,10 @@
     grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
     gap: var(--space-md);
     margin-bottom: var(--space-md);
+  }
+
+  .analytics-card--wide {
+    grid-column: 1 / -1;
   }
 
   .analytics-card {
