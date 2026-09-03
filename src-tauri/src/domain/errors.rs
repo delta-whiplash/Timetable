@@ -19,6 +19,8 @@ pub enum ValidationError {
     InvalidTimeFormat,
     #[error("invalid_day_configuration")]
     InvalidDayConfiguration,
+    #[error("invalid_travel_deduction_minutes")]
+    InvalidTravelDeductionMinutes { value: u16 },
 }
 
 #[derive(Debug, Error, Clone)]
@@ -83,6 +85,9 @@ impl ApplicationError {
                 }
                 ValidationError::InvalidDayConfiguration => {
                     "La configuration des jours est invalide."
+                }
+                ValidationError::InvalidTravelDeductionMinutes { .. } => {
+                    "La durée de déduction doit être entre 15 et 180 minutes."
                 }
             },
             Self::Storage(StorageError::StorageUnavailable) => {

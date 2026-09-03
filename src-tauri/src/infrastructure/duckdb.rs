@@ -102,7 +102,7 @@ impl DuckDb {
 
     fn load_week(&self, connection: &Connection, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id, week_start, overtime_threshold_minutes, updated_at FROM weeks WHERE id = ?1",
+            "SELECT id, week_start, overtime_threshold_minutes, travel_deduction_minutes, updated_at FROM weeks WHERE id = ?1",
         ))?;
 
         let mut rows = map_storage_error(statement.query(params![week_id.0]))?;
@@ -113,7 +113,8 @@ impl DuckDb {
         let stored_week_id: String = map_storage_error(row.get(0))?;
         let week_start: String = map_storage_error(row.get(1))?;
         let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
-        let updated_at: String = map_storage_error(row.get(3))?;
+        let travel_deduction_minutes: u16 = map_storage_error(row.get(3))?;
+        let updated_at: String = map_storage_error(row.get(4))?;
 
         let entries = self.load_entries(connection, &stored_week_id)?;
 
@@ -122,6 +123,7 @@ impl DuckDb {
             week_start: WeekStartDate::parse(&week_start).map_err(|_| StorageError::SerializationFailed)?,
             entries,
             overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+            travel_deduction_minutes: crate::domain::types::TravelDeductionMinutes(travel_deduction_minutes),
             updated_at,
         }))
     }
@@ -170,6 +172,7 @@ impl DuckDb {
                 id TEXT PRIMARY KEY,
                 week_start TEXT NOT NULL,
                 overtime_threshold_minutes INTEGER NOT NULL,
+                travel_deduction_minutes INTEGER NOT NULL DEFAULT 30,
                 updated_at TEXT NOT NULL
             )",
             [],
@@ -201,6 +204,8 @@ impl DuckDb {
                 default_start TEXT NOT NULL DEFAULT '08:00',
                 default_end TEXT NOT NULL DEFAULT '18:00',
                 default_break TEXT NOT NULL DEFAULT '01:00',
+                enable_travel_deduction INTEGER NOT NULL DEFAULT 1,
+                travel_deduction_minutes INTEGER NOT NULL DEFAULT 30,
                 updated_at TEXT NOT NULL
             )",
             [],
@@ -214,6 +219,22 @@ impl DuckDb {
         );
         let _ = connection.execute(
             "ALTER TABLE day_entries ADD COLUMN IF NOT EXISTS has_return_deduction INTEGER DEFAULT 0",
+            [],
+        );
+
+        // Migration: ajouter la colonne travel_deduction_minutes à weeks
+        let _ = connection.execute(
+            "ALTER TABLE weeks ADD COLUMN IF NOT EXISTS travel_deduction_minutes INTEGER DEFAULT 30",
+            [],
+        );
+
+        // Migration: ajouter les colonnes de configuration trajet aux settings
+        let _ = connection.execute(
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS enable_travel_deduction INTEGER DEFAULT 1",
+            [],
+        );
+        let _ = connection.execute(
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS travel_deduction_minutes INTEGER DEFAULT 30",
             [],
         );
 
@@ -259,7 +280,7 @@ impl DuckDb {
     pub fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
         let connection = self.shared()?;
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id, week_start, overtime_threshold_minutes, updated_at FROM weeks WHERE week_start = ?1",
+            "SELECT id, week_start, overtime_threshold_minutes, travel_deduction_minutes, updated_at FROM weeks WHERE week_start = ?1",
         ))?;
         let mut rows = map_storage_error(statement.query(params![week_start.as_string()]))?;
         let Some(row) = map_storage_error(rows.next())? else {
@@ -269,7 +290,8 @@ impl DuckDb {
         let week_id: String = map_storage_error(row.get(0))?;
         let stored_week_start: String = map_storage_error(row.get(1))?;
         let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
-        let updated_at: String = map_storage_error(row.get(3))?;
+        let travel_deduction_minutes: u16 = map_storage_error(row.get(3))?;
+        let updated_at: String = map_storage_error(row.get(4))?;
         let entries = self.load_entries(&connection, &week_id)?;
 
         Ok(Some(WeekSheet {
@@ -278,6 +300,7 @@ impl DuckDb {
                 .map_err(|_| StorageError::SerializationFailed)?,
             entries,
             overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+            travel_deduction_minutes: crate::domain::types::TravelDeductionMinutes(travel_deduction_minutes),
             updated_at,
         }))
     }
@@ -287,13 +310,14 @@ impl DuckDb {
         let transaction = map_storage_error(connection.transaction())?;
 
         map_storage_error(transaction.execute(
-            "INSERT INTO weeks (id, week_start, overtime_threshold_minutes, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (id) DO UPDATE SET week_start = ?2, overtime_threshold_minutes = ?3, updated_at = ?4",
+            "INSERT INTO weeks (id, week_start, overtime_threshold_minutes, travel_deduction_minutes, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (id) DO UPDATE SET week_start = ?2, overtime_threshold_minutes = ?3, travel_deduction_minutes = ?4, updated_at = ?5",
             params![
                 week.week_id.as_ref().expect("week_id must be set before save").0,
                 week.week_start.as_string(),
                 week.overtime_threshold.0,
+                week.travel_deduction_minutes.0,
                 Utc::now().to_rfc3339()
             ],
         ))?;
@@ -335,7 +359,7 @@ impl DuckDb {
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
-                w.id, w.week_start, w.overtime_threshold_minutes, w.updated_at,
+                w.id, w.week_start, w.overtime_threshold_minutes, w.travel_deduction_minutes, w.updated_at,
                 de.day_id, de.label, de.enabled, de.start_minutes, de.end_minutes, de.break_minutes, de.has_departure_deduction, de.has_return_deduction
              FROM weeks w
              LEFT JOIN day_entries de ON w.id = de.week_id
@@ -351,26 +375,28 @@ impl DuckDb {
             if weeks.last().map(|week| week.week_id.as_ref().expect("persisted week must have id").0.as_str()) != Some(week_id_str.as_str()) {
                 let week_start_str: String = map_storage_error(row.get(1))?;
                 let overtime_threshold: u16 = map_storage_error(row.get(2))?;
-                let updated_at: String = map_storage_error(row.get(3))?;
+                let travel_deduction_minutes: u16 = map_storage_error(row.get(3))?;
+                let updated_at: String = map_storage_error(row.get(4))?;
                 weeks.push(WeekSheet {
                     week_id: Some(WeekId(week_id_str.clone())),
                     week_start: WeekStartDate::parse(&week_start_str)
                         .map_err(|_| StorageError::SerializationFailed)?,
                     entries: Vec::new(),
                     overtime_threshold: OvertimeThresholdMinutes(overtime_threshold),
+                    travel_deduction_minutes: crate::domain::types::TravelDeductionMinutes(travel_deduction_minutes),
                     updated_at,
                 });
             }
 
             // LEFT JOIN can have NULL day columns for a week without entries
-            if let Ok(Some(day_id)) = row.get::<_, Option<u8>>(4) {
-                let label: String = map_storage_error(row.get(5))?;
-                let enabled: bool = map_storage_error(row.get(6))?;
-                let start_minutes: Option<u16> = map_storage_error(row.get(7))?;
-                let end_minutes: Option<u16> = map_storage_error(row.get(8))?;
-                let break_minutes: u16 = map_storage_error(row.get(9))?;
-                let has_departure_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(10))?.unwrap_or(0) == 1;
-                let has_return_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(11))?.unwrap_or(0) == 1;
+            if let Ok(Some(day_id)) = row.get::<_, Option<u8>>(5) {
+                let label: String = map_storage_error(row.get(6))?;
+                let enabled: bool = map_storage_error(row.get(7))?;
+                let start_minutes: Option<u16> = map_storage_error(row.get(8))?;
+                let end_minutes: Option<u16> = map_storage_error(row.get(9))?;
+                let break_minutes: u16 = map_storage_error(row.get(10))?;
+                let has_departure_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(11))?.unwrap_or(0) == 1;
+                let has_return_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(12))?.unwrap_or(0) == 1;
 
                 weeks.last_mut().expect("week pushed above").entries.push(DayEntry {
                     day_id: DayId(day_id),
@@ -471,8 +497,8 @@ impl DuckDb {
         let connection = self.shared()?;
         map_storage_error(connection.execute(
             "INSERT INTO settings
-             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
-             SELECT 1, ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7
+             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, enable_travel_deduction, travel_deduction_minutes, updated_at)
+             SELECT 1, ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9
              WHERE NOT EXISTS (SELECT 1 FROM settings WHERE id = 1)",
             params![
                 settings.overtime_threshold.0,
@@ -481,6 +507,8 @@ impl DuckDb {
                 settings.default_work_interval.start.to_hhmm(),
                 settings.default_work_interval.end.to_hhmm(),
                 TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
+                settings.enable_travel_deduction,
+                settings.travel_deduction_minutes.0,
                 Utc::now().to_rfc3339()
             ],
         ))?;
@@ -490,7 +518,7 @@ impl DuckDb {
     pub fn load_settings(&self) -> Result<AppSettings, StorageError> {
         let connection = self.shared()?;
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break
+            "SELECT overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, enable_travel_deduction, travel_deduction_minutes
              FROM settings
              WHERE id = 1",
         ))?;
@@ -506,6 +534,8 @@ impl DuckDb {
         let default_start: String = map_storage_error(row.get(4))?;
         let default_end: String = map_storage_error(row.get(5))?;
         let default_break: String = map_storage_error(row.get(6))?;
+        let enable_travel_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(7))?.unwrap_or(1) == 1;
+        let travel_deduction_minutes: u16 = map_storage_error(row.get::<_, Option<u16>>(8))?.unwrap_or(30);
         let configured_days = serde_json::from_str(&configured_days_json)
             .map_err(|_| StorageError::SerializationFailed)?;
 
@@ -520,6 +550,8 @@ impl DuckDb {
                 .map_err(|_| StorageError::SerializationFailed)?,
             configured_days,
             active_week_id: active_week_id.map(WeekId),
+            enable_travel_deduction,
+            travel_deduction_minutes: crate::domain::types::TravelDeductionMinutes(travel_deduction_minutes),
         })
     }
 
@@ -529,11 +561,11 @@ impl DuckDb {
             serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
         map_storage_error(connection.execute(
             "INSERT INTO settings
-             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, enable_travel_deduction, travel_deduction_minutes, updated_at)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT (id) DO UPDATE SET
                overtime_threshold_minutes = ?1, theme = ?2, configured_days_json = ?3, active_week_id = ?4,
-               default_start = ?5, default_end = ?6, default_break = ?7, updated_at = ?8",
+               default_start = ?5, default_end = ?6, default_break = ?7, enable_travel_deduction = ?8, travel_deduction_minutes = ?9, updated_at = ?10",
             params![
                 settings.overtime_threshold.0,
                 settings.theme.to_string(),
@@ -542,6 +574,8 @@ impl DuckDb {
                 settings.default_work_interval.start.to_hhmm(),
                 settings.default_work_interval.end.to_hhmm(),
                 TimeOfDay(settings.default_break_minutes.0).to_hhmm(),
+                settings.enable_travel_deduction,
+                settings.travel_deduction_minutes.0,
                 Utc::now().to_rfc3339()
             ],
         ))?;
@@ -567,13 +601,14 @@ impl DuckDb {
                             AND de.end_minutes > de.start_minutes
                         THEN GREATEST(0,
                             de.end_minutes - de.start_minutes - COALESCE(de.break_minutes, 0)
-                            - 30 * COALESCE(de.has_departure_deduction, 0)
-                            - 30 * COALESCE(de.has_return_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_departure_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_return_deduction, 0)
                         )
                         ELSE 0
                     END
                 ), 0) as total_minutes
             FROM day_entries de
+            LEFT JOIN weeks w ON de.week_id = w.id
             GROUP BY de.day_id
             ORDER BY de.day_id ASC",
         ))?;
@@ -618,8 +653,8 @@ impl DuckDb {
                             AND de.end_minutes IS NOT NULL
                         THEN GREATEST(0,
                             de.end_minutes - de.start_minutes - de.break_minutes
-                            - 30 * COALESCE(de.has_departure_deduction, 0)
-                            - 30 * COALESCE(de.has_return_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_departure_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_return_deduction, 0)
                         )
                         ELSE 0
                     END
@@ -663,8 +698,8 @@ impl DuckDb {
                             AND de.end_minutes IS NOT NULL
                         THEN GREATEST(0,
                             de.end_minutes - de.start_minutes - de.break_minutes
-                            - 30 * COALESCE(de.has_departure_deduction, 0)
-                            - 30 * COALESCE(de.has_return_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_departure_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_return_deduction, 0)
                         )
                         ELSE 0
                     END
@@ -711,6 +746,7 @@ impl DuckDb {
             "SELECT
                 w.week_start,
                 w.overtime_threshold_minutes,
+                w.travel_deduction_minutes,
                 COALESCE(SUM(
                     CASE
                         WHEN de.enabled = 1
@@ -718,15 +754,15 @@ impl DuckDb {
                             AND de.end_minutes IS NOT NULL
                         THEN GREATEST(0,
                             de.end_minutes - de.start_minutes - de.break_minutes
-                            - 30 * COALESCE(de.has_departure_deduction, 0)
-                            - 30 * COALESCE(de.has_return_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_departure_deduction, 0)
+                            - COALESCE(w.travel_deduction_minutes, 30) * COALESCE(de.has_return_deduction, 0)
                         )
                         ELSE 0
                     END
                 ), 0) as effective_minutes
             FROM weeks w
             LEFT JOIN day_entries de ON w.id = de.week_id
-            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes
+            GROUP BY w.id, w.week_start, w.overtime_threshold_minutes, w.travel_deduction_minutes
             ORDER BY w.week_start DESC
             LIMIT 12",
         ))?;
@@ -781,7 +817,7 @@ mod connection_reuse_tests {
     use crate::{
         domain::{
             logic::{default_entries, default_settings},
-            types::{OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
+            types::{OvertimeThresholdMinutes, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -802,6 +838,7 @@ mod connection_reuse_tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
             updated_at: String::new(),
         };
 
@@ -831,7 +868,7 @@ mod tests {
     use crate::{
         domain::{
             logic::{default_entries, default_settings, summarize_week},
-            types::{OvertimeThresholdMinutes, WeekSheet, WeekStartDate},
+            types::{OvertimeThresholdMinutes, TravelDeductionMinutes, WeekSheet, WeekStartDate},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -850,7 +887,8 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
 
         store.save_week(&week).expect("save");
@@ -890,7 +928,8 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
 
         store.save_week(&week).expect("save");
@@ -916,7 +955,8 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
         store.save_week(&week1).expect("save week1");
 
@@ -925,7 +965,8 @@ mod tests {
             week_start: WeekStartDate::parse("2024-01-15").expect("parse date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
         store.save_week(&week2).expect("save week2");
 
@@ -948,7 +989,7 @@ mod balance_tests {
     use crate::{
         domain::{
             logic::{default_entries, default_settings, summarize_week},
-            types::{OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
+            types::{OvertimeThresholdMinutes, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -966,14 +1007,16 @@ mod balance_tests {
             week_start: WeekStartDate::parse("2030-01-07").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
         let week2 = WeekSheet {
             week_id: Some(WeekId::new()),
             week_start: WeekStartDate::parse("2030-01-14").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(3000),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
         store.save_week(&week1).expect("save w1");
         store.save_week(&week2).expect("save w2");
@@ -1003,7 +1046,8 @@ mod balance_tests {
             week_start: WeekStartDate::parse("2030-01-07").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
         store.save_week(&week).expect("save");
 
@@ -1036,7 +1080,7 @@ mod analytics_consistency_tests {
             logic::{default_entries, default_settings},
             types::{
                 BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes,
-                TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
+                TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval,
             },
         },
         infrastructure::duckdb::DuckDb,
@@ -1052,7 +1096,8 @@ mod analytics_consistency_tests {
             week_start: WeekStartDate::parse(week_start).expect("date"),
             entries,
             overtime_threshold: OvertimeThresholdMinutes(2100),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         }
     }
 

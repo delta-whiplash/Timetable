@@ -111,7 +111,7 @@ pub fn build_export_sheet(
         .entries
         .iter()
         .map(|entry| {
-            let total = calculate_day_minutes(entry)?;
+            let total = calculate_day_minutes(entry, week.travel_deduction_minutes)?;
             Ok(vec![
                 entry.label.0.clone(),
                 if entry.enabled { "Oui" } else { "Non" }.to_string(),
@@ -184,8 +184,8 @@ mod tests {
     use super::*;
     use crate::domain::logic::{default_settings, minutes_to_label, signed_minutes_to_label};
     use crate::domain::types::{
-        BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, WeekId,
-        WeekStartDate, WorkInterval,
+        BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay,
+        TravelDeductionMinutes, WeekId, WeekStartDate, WorkInterval,
     };
 
     fn day(day_id: u8, label: &str, start: Option<(u16, u16)>, break_minutes: u16, enabled: bool) -> DayEntry {
@@ -220,7 +220,8 @@ mod tests {
                 day(6, "Dimanche", None, 0, false),
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         }
     }
 

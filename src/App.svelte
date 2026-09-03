@@ -51,6 +51,7 @@
       weekId: activeWeek.weekId,
       weekStart: activeWeek.weekStart,
       overtimeThresholdMinutes: activeWeek.overtimeThresholdMinutes,
+      travelDeductionMinutes: activeWeek.travelDeductionMinutes,
       entries: entries.map((entry) => ({
         dayId: entry.dayId,
         label: entry.label,
@@ -184,6 +185,8 @@
                 defaultStart={state.settings?.defaultStart ?? "08:00"}
                 defaultEnd={state.settings?.defaultEnd ?? "18:00"}
                 defaultBreak={state.settings?.defaultBreak ?? "01:00"}
+                enableTravelDeduction={state.settings?.enableTravelDeduction ?? true}
+                travelDeductionMinutes={state.activeWeek?.travelDeductionMinutes ?? 30}
                 on:change={(e) => updateEntry(e.detail)}
               />
             </div>

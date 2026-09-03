@@ -45,6 +45,7 @@ fn save_settings_does_not_retroactively_change_past_week_threshold() {
             week_id: view.week_id,
             week_start: "2020-01-06".to_string(),
             overtime_threshold_minutes: 2100,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -79,10 +80,12 @@ fn save_settings_does_not_retroactively_change_past_week_threshold() {
     service
         .save_settings(SaveSettingsInput {
             overtime_threshold_minutes: 2400,
+            travel_deduction_minutes: 30,
             default_start: "08:00".to_string(),
             default_end: "18:00".to_string(),
             default_break: "01:00".to_string(),
             configured_days,
+            enable_travel_deduction: true,
         })
         .expect("change threshold");
 
@@ -121,6 +124,7 @@ fn delete_week_is_transactional() {
             week_id: view.week_id,
             week_start: "2030-04-01".to_string(),
             overtime_threshold_minutes: 2100,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -180,6 +184,7 @@ fn list_weeks_returns_real_updated_at() {
             week_id: Some("test-week".to_string()),
             week_start: "2030-05-06".to_string(),
             overtime_threshold_minutes: 2100,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -230,6 +235,7 @@ fn save_week_returns_fresh_balance() {
             week_id: Some("balance-test".to_string()),
             week_start: "2030-06-03".to_string(),
             overtime_threshold_minutes: 2100,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -269,6 +275,7 @@ fn resolve_active_week_falls_back_on_invalid_week() {
             week_id: Some("will-be-corrupt".to_string()),
             week_start: "2030-07-01".to_string(),
             overtime_threshold_minutes: 2100,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -321,6 +328,7 @@ fn saves_week_and_updates_summary() {
             week_id: week.week_id,
             week_start: week.week_start,
             overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
             entries: vec![
                 SaveWeekDayEntryInput {
                     day_id: 0,
@@ -404,6 +412,7 @@ fn saves_week_and_updates_summary() {
     let updated_settings = service
         .save_settings(SaveSettingsInput {
             overtime_threshold_minutes: 30 * 60,
+            travel_deduction_minutes: 30,
             default_start: defaults.default_work_interval.start.to_hhmm(),
             default_end: defaults.default_work_interval.end.to_hhmm(),
             default_break: "01:00".to_string(),
@@ -416,6 +425,7 @@ fn saves_week_and_updates_summary() {
                     enabled: day.enabled,
                 })
                 .collect(),
+            enable_travel_deduction: true,
         })
         .expect("save settings");
 
@@ -446,6 +456,7 @@ fn exports_week_as_xlsx() {
             week_id: view.week_id,
             week_start: "2026-09-07".to_string(),
             overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -525,6 +536,7 @@ fn week_navigation_does_not_persist_template() {
             week_id: None,
             week_start: "2030-01-07".to_string(),
             overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -565,6 +577,7 @@ fn duplicate_week_start_fails_at_db_level() {
         week_start: WeekStartDate::parse("2030-02-04").expect("date"),
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        travel_deduction_minutes: timetable_desktop_lib::domain::types::TravelDeductionMinutes::default(),
         updated_at: String::new(),
     };
     store.save_week(&week).expect("première semaine");
@@ -576,6 +589,7 @@ fn duplicate_week_start_fails_at_db_level() {
         week_start: WeekStartDate::parse("2030-02-04").expect("date"),
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        travel_deduction_minutes: timetable_desktop_lib::domain::types::TravelDeductionMinutes::default(),
         updated_at: String::new(),
     };
     let result = store.save_week(&doublon);
@@ -603,6 +617,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
             week_id: Some("id-A".to_string()),
             week_start: "2030-03-04".to_string(),
             overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),
@@ -623,6 +638,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
             week_id: Some("id-B".to_string()),
             week_start: "2030-03-04".to_string(),
             overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
                 day_id: 0,
                 label: "Lundi".to_string(),

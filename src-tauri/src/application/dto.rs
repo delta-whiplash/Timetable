@@ -27,6 +27,7 @@ pub struct SaveWeekInput {
     pub week_id: Option<String>,
     pub week_start: String,
     pub overtime_threshold_minutes: u16,
+    pub travel_deduction_minutes: u16,
     pub entries: Vec<SaveWeekDayEntryInput>,
 }
 
@@ -58,6 +59,8 @@ pub struct SaveSettingsInput {
     pub default_end: String,
     pub default_break: String,
     pub configured_days: Vec<ConfiguredDayView>,
+    pub enable_travel_deduction: bool,
+    pub travel_deduction_minutes: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +94,7 @@ pub struct WeekSheetView {
     pub week_start: String,
     pub entries: Vec<DayEntryView>,
     pub overtime_threshold_minutes: u16,
+    pub travel_deduction_minutes: u16,
     pub summary: WeekSummaryView,
 }
 
@@ -116,6 +120,9 @@ pub struct SettingsView {
     pub default_break: String,
     pub configured_days: Vec<ConfiguredDayView>,
     pub active_week_id: Option<String>,
+    pub enable_travel_deduction: bool,
+    pub travel_deduction_minutes: u16,
+    pub travel_deduction_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +207,9 @@ pub fn settings_to_view(settings: &AppSettings) -> SettingsView {
             .map(configured_day_to_view)
             .collect(),
         active_week_id: settings.active_week_id.as_ref().map(|week_id| week_id.0.clone()),
+        enable_travel_deduction: settings.enable_travel_deduction,
+        travel_deduction_minutes: settings.travel_deduction_minutes.0,
+        travel_deduction_label: format!("{} min", settings.travel_deduction_minutes.0),
     }
 }
 
@@ -220,7 +230,7 @@ pub fn week_to_view(
         .entries
         .iter()
         .map(|entry| {
-            let total_minutes = calculate_day_minutes(entry)?;
+            let total_minutes = calculate_day_minutes(entry, week.travel_deduction_minutes)?;
             Ok(DayEntryView {
                 day_id: entry.day_id.0,
                 label: entry.label.0.clone(),
@@ -241,6 +251,7 @@ pub fn week_to_view(
         week_start: week.week_start.as_string(),
         entries,
         overtime_threshold_minutes: week.overtime_threshold.0,
+        travel_deduction_minutes: week.travel_deduction_minutes.0,
         summary: WeekSummaryView {
             total_label: minutes_to_label(summary.total_minutes),
             percentage: threshold_percentage(summary.total_minutes, week.overtime_threshold.0),

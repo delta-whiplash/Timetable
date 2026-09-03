@@ -28,6 +28,7 @@ const ACTIVE_WEEK = {
   weekStart: "2026-08-31",
   entries: [],
   overtimeThresholdMinutes: 2100,
+  travelDeductionMinutes: 30,
   summary: {
     totalLabel: "45h30",
     percentage: 130,
@@ -49,7 +50,10 @@ describe("appStore.persistSettings", () => {
       defaultEnd: "18:00",
       defaultBreak: "01:00",
       configuredDays: [],
-      activeWeekId: "w1"
+      activeWeekId: "w1",
+      enableTravelDeduction: true,
+      travelDeductionMinutes: 30,
+      travelDeductionLabel: "30 min"
     });
   });
 
@@ -87,7 +91,9 @@ describe("appStore.persistSettings", () => {
       defaultStart: "08:00",
       defaultEnd: "18:00",
       defaultBreak: "01:00",
-      configuredDays: []
+      configuredDays: [],
+      enableTravelDeduction: true,
+      travelDeductionMinutes: 30
     });
 
     // Sans le reload, la sidebar garderait 130 % / +10h30 (ancien seuil)
@@ -104,6 +110,7 @@ describe("appStore.persistWeek", () => {
     weekId: "w1",
     weekStart: "2026-08-31",
     overtimeThresholdMinutes: 2100,
+    travelDeductionMinutes: 30,
     entries: []
   };
 

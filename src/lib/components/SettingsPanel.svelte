@@ -13,6 +13,9 @@
   let defaultStartMinutes = toMinutes(settings.defaultStart) ?? 0;
   let defaultEndMinutes = toMinutes(settings.defaultEnd) ?? 0;
   let defaultBreakMinutes = toMinutes(settings.defaultBreak) ?? 0;
+  // Travel deduction settings
+  let enableTravelDeduction = settings.enableTravelDeduction;
+  let travelDeductionMinutes = settings.travelDeductionMinutes;
 
   // Format minutes to human-readable "Xh Ymin"
   function formatMinutesToHuman(minutes: number): string {
@@ -33,7 +36,9 @@
       defaultStart: toHHMM(defaultStartMinutes),
       defaultEnd: toHHMM(defaultEndMinutes),
       defaultBreak: toHHMM(defaultBreakMinutes),
-      configuredDays: settings.configuredDays
+      configuredDays: settings.configuredDays,
+      enableTravelDeduction,
+      travelDeductionMinutes,
     });
   }
 
@@ -51,6 +56,10 @@
 
   function adjustDefaultBreak(amount: number) {
     defaultBreakMinutes = Math.max(0, Math.min(180, defaultBreakMinutes + amount));
+  }
+
+  function adjustTravelDeduction(amount: number) {
+    travelDeductionMinutes = Math.max(15, Math.min(180, travelDeductionMinutes + amount));
   }
 </script>
 
@@ -103,6 +112,29 @@
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultBreak(-30)} aria-label="Diminuer de 30 minutes">−</button>
         <span class="stepper-value">{formatMinutesToHuman(defaultBreakMinutes)}</span>
         <button class="stepper-btn" type="button" on:click={() => adjustDefaultBreak(30)} aria-label="Augmenter de 30 minutes">+</button>
+      </div>
+    </div>
+
+    <!-- Déduction trajet -->
+    <div class="field field--stepper">
+      <span>Déduction trajet</span>
+      <div class="travel-deduction-control">
+        <label class="toggle-label">
+          <input
+            type="checkbox"
+            class="toggle-checkbox"
+            checked={enableTravelDeduction}
+            on:change={(e) => enableTravelDeduction = e.currentTarget.checked}
+          />
+          <span class="toggle-text">{enableTravelDeduction ? "Activée" : "Désactivée"}</span>
+        </label>
+        {#if enableTravelDeduction}
+          <div class="stepper travel-deduction-stepper">
+            <button class="stepper-btn" type="button" on:click={() => adjustTravelDeduction(-15)} aria-label="Diminuer de 15 minutes">−</button>
+            <span class="stepper-value">{travelDeductionMinutes} min</span>
+            <button class="stepper-btn" type="button" on:click={() => adjustTravelDeduction(15)} aria-label="Augmenter de 15 minutes">+</button>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -342,5 +374,36 @@
     background: var(--color-surface);
     color: var(--color-primary);
     box-shadow: var(--shadow-sm);
+  }
+
+  .travel-deduction-control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+
+  .toggle-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--color-primary);
+  }
+
+  .toggle-text {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+  }
+
+  .travel-deduction-stepper {
+    margin-top: 0.25rem;
   }
 </style>

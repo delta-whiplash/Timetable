@@ -16,7 +16,7 @@ use crate::{
         logic::{default_entries, minutes_to_label, summarize_week},
         types::{
             AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel,
-            OvertimeThresholdMinutes, TimeOfDay, WeekId, WeekSheet,
+            OvertimeThresholdMinutes, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet,
             WeekStartDate, WorkInterval,
         },
     },
@@ -156,6 +156,10 @@ impl ApplicationService {
         };
         settings.default_break_minutes = BreakMinutes::parse(&input.default_break)?;
 
+        // Nouvelles options de déduction trajet
+        settings.enable_travel_deduction = input.enable_travel_deduction;
+        settings.travel_deduction_minutes = TravelDeductionMinutes::new(input.travel_deduction_minutes)?;
+
         self.persist_settings(&settings)?;
 
         // Rétro-écrire le seuil UNIQUEMENT si la semaine active est la semaine courante
@@ -245,11 +249,13 @@ impl ApplicationService {
         // Issue #1 : template en mémoire avec week_id: None, pas de persistance
         // tant que l'utilisateur ne sauvegarde pas explicitement.
         // Le solde cumulé affichera "--" jusqu'à la première sauvegarde.
+        // Snapshot de travel_deduction_minutes au moment de la création
         let week = WeekSheet {
             week_id: None,
             week_start,
             entries: default_entries(settings),
             overtime_threshold: settings.overtime_threshold,
+            travel_deduction_minutes: settings.travel_deduction_minutes,
             updated_at: String::new(),
         };
 
@@ -260,6 +266,7 @@ impl ApplicationService {
 
     fn parse_week_input(&self, input: SaveWeekInput) -> Result<WeekSheet, ApplicationError> {
         let overtime_threshold = OvertimeThresholdMinutes::new(input.overtime_threshold_minutes)?;
+        let travel_deduction_minutes = TravelDeductionMinutes::new(input.travel_deduction_minutes)?;
         let entries = input
             .entries
             .into_iter()
@@ -271,6 +278,7 @@ impl ApplicationService {
             week_start: WeekStartDate::parse(&input.week_start)?,
             entries,
             overtime_threshold,
+            travel_deduction_minutes,
             updated_at: String::new(),
         })
     }

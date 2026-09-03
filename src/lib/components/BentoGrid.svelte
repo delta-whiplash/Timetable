@@ -7,6 +7,8 @@
   export let defaultStart = "08:00";
   export let defaultEnd = "18:00";
   export let defaultBreak = "01:00";
+  export let enableTravelDeduction = true;
+  export let travelDeductionMinutes = 30;
 
   // Split entries: Monday-Saturday (regular cards), Sunday (full-width)
   $: regularEntries = entries.filter((e) => e.dayId < 6);
@@ -21,6 +23,8 @@
       {defaultStart}
       {defaultEnd}
       {defaultBreak}
+      {enableTravelDeduction}
+      {travelDeductionMinutes}
       on:change
     />
   {/each}
@@ -33,6 +37,8 @@
         {defaultStart}
         {defaultEnd}
         {defaultBreak}
+        {enableTravelDeduction}
+        {travelDeductionMinutes}
         on:change
       />
     </div>

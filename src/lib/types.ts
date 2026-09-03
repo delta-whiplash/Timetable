@@ -25,6 +25,7 @@ export interface WeekSheetView {
   weekStart: string;
   entries: DayEntryView[];
   overtimeThresholdMinutes: number;
+  travelDeductionMinutes: number;
   summary: WeekSummaryView;
 }
 
@@ -52,6 +53,9 @@ export interface SettingsView {
   defaultBreak: string;
   configuredDays: ConfiguredDayView[];
   activeWeekId: string | null;
+  enableTravelDeduction: boolean;
+  travelDeductionMinutes: number;
+  travelDeductionLabel: string;
 }
 
 export interface BootstrapState {
@@ -73,6 +77,7 @@ export interface SaveWeekInput {
   weekId: string | null;
   weekStart: string;
   overtimeThresholdMinutes: number;
+  travelDeductionMinutes: number;
   entries: SaveWeekDayEntryInput[];
 }
 
@@ -90,6 +95,8 @@ export interface SaveSettingsInput {
   defaultEnd: string;
   defaultBreak: string;
   configuredDays: ConfiguredDayView[];
+  enableTravelDeduction: boolean;
+  travelDeductionMinutes: number;
 }
 
 export interface CommandError {

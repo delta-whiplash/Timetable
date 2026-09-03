@@ -131,6 +131,31 @@ impl OvertimeThresholdMinutes {
     }
 }
 
+/// Durée de déduction pour trajet (en minutes)
+/// Valeur configurable entre 15 et 180 minutes (default: 30)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct TravelDeductionMinutes(pub u16);
+
+impl TravelDeductionMinutes {
+    pub const DEFAULT: u16 = 30;
+    pub const MIN: u16 = 15;
+    pub const MAX: u16 = 180;
+
+    pub fn new(value: u16) -> Result<Self, ValidationError> {
+        if !(Self::MIN..=Self::MAX).contains(&value) {
+            return Err(ValidationError::InvalidTravelDeductionMinutes { value });
+        }
+        Ok(Self(value))
+    }
+}
+
+impl Default for TravelDeductionMinutes {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkInterval {
     pub start: TimeOfDay,
@@ -163,6 +188,8 @@ pub struct WeekSheet {
     pub week_start: WeekStartDate,
     pub entries: Vec<DayEntry>,
     pub overtime_threshold: OvertimeThresholdMinutes,
+    /// Snapshot de la déduction trajet au moment de la création de la semaine
+    pub travel_deduction_minutes: TravelDeductionMinutes,
     pub updated_at: String,
 }
 
@@ -208,6 +235,10 @@ pub struct AppSettings {
     pub default_break_minutes: BreakMinutes,
     pub configured_days: Vec<ConfiguredDay>,
     pub active_week_id: Option<WeekId>,
+    /// Active/désactive la fonctionnalité de déduction trajet
+    pub enable_travel_deduction: bool,
+    /// Durée de déduction par case cochée (snapshot au moment de la création de semaine)
+    pub travel_deduction_minutes: TravelDeductionMinutes,
 }
 
 pub fn default_configured_days() -> Vec<ConfiguredDay> {

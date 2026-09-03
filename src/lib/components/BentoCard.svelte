@@ -8,6 +8,8 @@
   export let defaultStart = "08:00";
   export let defaultEnd = "18:00";
   export let defaultBreak = "01:00";
+  export let enableTravelDeduction = true;
+  export let travelDeductionMinutes = 30;
 
   const dispatch = createEventDispatcher();
 
@@ -85,16 +87,18 @@
           aria-label="Début +30 minutes"
         >+</button>
       </div>
-      <label class="bento-card-deplacement">
-        <input
-          type="checkbox"
-          class="bento-card-deplacement-checkbox"
-          checked={entry.hasDepartureDeduction}
-          disabled={disabled || !entry.enabled}
-          on:change={(e) => updateField("hasDepartureDeduction", e.currentTarget.checked)}
-        />
-        <span class="bento-card-deplacement-label">Départ 30min</span>
-      </label>
+      {#if enableTravelDeduction}
+	      <label class="bento-card-deplacement">
+	        <input
+	          type="checkbox"
+	          class="bento-card-deplacement-checkbox"
+	          checked={entry.hasDepartureDeduction}
+	          disabled={disabled || !entry.enabled}
+	          on:change={(e) => updateField("hasDepartureDeduction", e.currentTarget.checked)}
+	        />
+	        <span class="bento-card-deplacement-label">Départ {travelDeductionMinutes}min</span>
+	      </label>
+	    {/if}
     </div>
 
     <div class="bento-card-time">
@@ -118,16 +122,18 @@
           aria-label="Fin +30 minutes"
         >+</button>
       </div>
-      <label class="bento-card-deplacement">
-        <input
-          type="checkbox"
-          class="bento-card-deplacement-checkbox"
-          checked={entry.hasReturnDeduction}
-          disabled={disabled || !entry.enabled}
-          on:change={(e) => updateField("hasReturnDeduction", e.currentTarget.checked)}
-        />
-        <span class="bento-card-deplacement-label">Retour 30min</span>
-      </label>
+      {#if enableTravelDeduction}
+        <label class="bento-card-deplacement">
+          <input
+            type="checkbox"
+            class="bento-card-deplacement-checkbox"
+            checked={entry.hasReturnDeduction}
+            disabled={disabled || !entry.enabled}
+            on:change={(e) => updateField("hasReturnDeduction", e.currentTarget.checked)}
+          />
+          <span class="bento-card-deplacement-label">Retour {travelDeductionMinutes}min</span>
+        </label>
+      {/if}
     </div>
   </div>
 

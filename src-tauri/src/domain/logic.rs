@@ -1,8 +1,8 @@
 use super::{
     errors::ValidationError,
     types::{
-        default_configured_days, BreakMinutes, DayEntry, ThemePreference, WeekSheet,
-        WeekSummary, WorkInterval,
+        default_configured_days, BreakMinutes, DayEntry, ThemePreference, TravelDeductionMinutes,
+        WeekSheet, WeekSummary, WorkInterval,
     },
 };
 
@@ -75,7 +75,10 @@ pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
     Ok(())
 }
 
-pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
+pub fn calculate_day_minutes(
+    entry: &DayEntry,
+    travel_deduction_minutes: TravelDeductionMinutes,
+) -> Result<u16, ValidationError> {
     validate_day(entry)?;
     if !entry.enabled {
         return Ok(0);
@@ -87,12 +90,12 @@ pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
 
     let mut net = i32::from(interval.end.0 - interval.start.0 - entry.break_minutes.0);
 
-    // Déductions déplacement (30min par tick actif)
+    // Déductions déplacement (montant configurable par case cochée)
     if entry.has_departure_deduction {
-        net -= 30;
+        net -= i32::from(travel_deduction_minutes.0);
     }
     if entry.has_return_deduction {
-        net -= 30;
+        net -= i32::from(travel_deduction_minutes.0);
     }
 
     // Saturer à 0 (pas de temps négatif)
@@ -104,7 +107,7 @@ pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError>
     let mut worked_days = 0_u8;
 
     for entry in &sheet.entries {
-        let minutes = calculate_day_minutes(entry)?;
+        let minutes = calculate_day_minutes(entry, sheet.travel_deduction_minutes)?;
         if minutes > 0 {
             total = total.saturating_add(minutes);
             worked_days = worked_days.saturating_add(1);
@@ -148,6 +151,8 @@ pub fn default_settings() -> super::types::AppSettings {
         default_break_minutes: BreakMinutes(60),
         configured_days: default_configured_days(),
         active_week_id: None,
+        enable_travel_deduction: true,
+        travel_deduction_minutes: TravelDeductionMinutes::default(),
     }
 }
 
@@ -158,7 +163,7 @@ mod tests {
     use super::*;
     use crate::domain::types::{
         AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay,
-        ThemePreference, WeekId, WeekSheet, WeekStartDate, WorkInterval,
+        ThemePreference, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval,
     };
 
     #[test]
@@ -175,6 +180,8 @@ mod tests {
             default_break_minutes: BreakMinutes(45),
             configured_days: default_configured_days(),
             active_week_id: None,
+            enable_travel_deduction: true,
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
         };
 
         let entries = default_entries(&settings);
@@ -212,7 +219,8 @@ mod tests {
                 build_day(1, 480, 1020, 30),
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
-        updated_at: String::new(),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
         };
 
         let summary = summarize_week(&sheet).expect("summary should be valid");
@@ -247,7 +255,7 @@ mod tests {
         fn total_minutes_never_negative(start in 0u16..1200, duration in 1u16..360, break_minutes in 0u16..120) {
             let end = start.saturating_add(duration).min(1439);
             let entry = build_day(0, start, end.max(start + 1), break_minutes.min(duration.saturating_sub(1)));
-            let total = calculate_day_minutes(&entry).expect("valid day");
+            let total = calculate_day_minutes(&entry, TravelDeductionMinutes::default()).expect("valid day");
             prop_assert!(total <= 1439);
         }
     }
@@ -257,42 +265,67 @@ mod tests {
         let settings: AppSettings = default_settings();
         assert_eq!(settings.overtime_threshold.0, 2100);
         assert_eq!(settings.configured_days.len(), 7);
+        assert!(settings.enable_travel_deduction);
+        assert_eq!(settings.travel_deduction_minutes.0, 30);
     }
 
     #[test]
     fn departure_deduction_reduces_time_by_30min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60); // 08:00-18:00, 60min break
+        let deduction = TravelDeductionMinutes::default(); // 30 min
+
         // Sans déduction: 600 - 60 = 540min
-        assert_eq!(calculate_day_minutes(&entry).unwrap(), 540);
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 540);
 
         // Avec déduction départ: 540 - 30 = 510min
         entry.has_departure_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry).unwrap(), 510);
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 510);
     }
 
     #[test]
     fn return_deduction_reduces_time_by_30min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        let deduction = TravelDeductionMinutes::default(); // 30 min
+
         // Avec déduction retour: 540 - 30 = 510min
         entry.has_return_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry).unwrap(), 510);
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 510);
     }
 
     #[test]
     fn both_deductions_reduce_time_by_60min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        let deduction = TravelDeductionMinutes::default(); // 30 min
+
         // Avec les deux déductions: 540 - 60 = 480min (8h net)
         entry.has_departure_deduction = true;
         entry.has_return_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry).unwrap(), 480);
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 480);
     }
 
     #[test]
     fn deduction_saturates_at_zero() {
         let mut entry = build_day(0, 8 * 60, 9 * 60, 0); // 08:00-09:00, 0 break = 60min
+        let deduction = TravelDeductionMinutes::default(); // 30 min
+
         entry.has_departure_deduction = true;
         entry.has_return_deduction = true;
         // 60 - 30 - 30 = 0 (saturé)
-        assert_eq!(calculate_day_minutes(&entry).unwrap(), 0);
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 0);
+    }
+
+    #[test]
+    fn configurable_deduction_amount() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60); // 08:00-18:00, 60min break = 540min net
+
+        // Avec 20min de déduction
+        let deduction_20 = TravelDeductionMinutes::new(20).unwrap();
+        entry.has_departure_deduction = true;
+        assert_eq!(calculate_day_minutes(&entry, deduction_20).unwrap(), 520); // 540 - 20 = 520
+
+        // Avec 45min de déduction
+        let deduction_45 = TravelDeductionMinutes::new(45).unwrap();
+        entry.has_return_deduction = true;
+        assert_eq!(calculate_day_minutes(&entry, deduction_45).unwrap(), 450); // 540 - 45 - 45 = 450
     }
 }
