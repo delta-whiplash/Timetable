@@ -12,8 +12,8 @@ use crate::{
         errors::StorageError,
         logic::{default_settings, minutes_to_label},
         types::{
-            AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes,
-            ThemePreference, TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval,
+            AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, DayType, OvertimeThresholdMinutes,
+            ThemePreference, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval,
         },
     },
 };
@@ -158,6 +158,7 @@ impl DuckDb {
                 enabled,
                 has_departure_deduction,
                 has_return_deduction,
+                day_type: if enabled { DayType::Work } else { DayType::Disabled },
             });
         }
 
@@ -406,6 +407,7 @@ impl DuckDb {
                     enabled,
                     has_departure_deduction,
                     has_return_deduction,
+                    day_type: if enabled { DayType::Work } else { DayType::Disabled },
                 });
             }
         }
@@ -1078,7 +1080,7 @@ mod analytics_consistency_tests {
         domain::{
             logic::{default_entries, default_settings},
             types::{
-                BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes,
+                BreakMinutes, DayEntry, DayId, DayLabel, DayType, OvertimeThresholdMinutes,
                 TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval,
             },
         },
@@ -1113,6 +1115,7 @@ mod analytics_consistency_tests {
             enabled: true,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: DayType::Work,
         }
     }
 
@@ -1126,6 +1129,7 @@ mod analytics_consistency_tests {
             enabled: false,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: DayType::Disabled,
         }
     }
 
@@ -1258,7 +1262,7 @@ mod balance_sql_equivalence_tests {
     use crate::{
         domain::{
             logic::{default_entries, default_settings},
-            types::{BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval},
+            types::{BreakMinutes, DayEntry, DayId, DayLabel, DayType, OvertimeThresholdMinutes, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet, WeekStartDate, WorkInterval},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -1283,6 +1287,7 @@ mod balance_sql_equivalence_tests {
             enabled: false,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: DayType::Disabled,
         }
     }
 
@@ -1315,6 +1320,7 @@ mod balance_sql_equivalence_tests {
             enabled: true,
             has_departure_deduction: true,
             has_return_deduction: true,
+            day_type: DayType::Work,
         };
         let week = week_with(monday.clone(), "2030-01-07");
         store.save_week(&week).expect("save");
@@ -1413,6 +1419,7 @@ mod balance_sql_equivalence_tests {
             enabled: true,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: DayType::Work,
         };
         let week = week_with(monday, "2030-01-07");
         store.save_week(&week).expect("save");

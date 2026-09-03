@@ -1,7 +1,7 @@
 use super::{
     errors::ValidationError,
     types::{
-        default_configured_days, BreakMinutes, DayEntry, ThemePreference, TravelDeductionMinutes,
+        default_configured_days, BreakMinutes, DayEntry, DayType, ThemePreference, TravelDeductionMinutes,
         WeekSheet, WeekSummary, WorkInterval,
     },
 };
@@ -39,6 +39,11 @@ pub fn default_entries(settings: &super::types::AppSettings) -> Vec<DayEntry> {
             enabled: day.enabled,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: if day.enabled {
+                DayType::Work
+            } else {
+                DayType::Disabled
+            },
         })
         .collect()
 }
@@ -206,6 +211,7 @@ mod tests {
             enabled: true,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: DayType::Work,
         }
     }
 

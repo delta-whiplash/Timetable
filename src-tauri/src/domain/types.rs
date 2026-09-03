@@ -109,6 +109,20 @@ impl TimeOfDay {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DayType {
+    Work,
+    Vacation,
+    Disabled,
+}
+
+impl Default for DayType {
+    fn default() -> Self {
+        Self::Work
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BreakMinutes(pub u16);
 
@@ -173,6 +187,7 @@ pub struct DayEntry {
     pub has_departure_deduction: bool,
     /// Déduction 30min sur l'heure de retour (déplacement travail-domicile)
     pub has_return_deduction: bool,
+    pub day_type: DayType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,5 +305,12 @@ mod tests {
         assert!(TimeOfDay::parse("18:60").is_err());
         assert!(TimeOfDay::parse("").is_err());
         assert!(TimeOfDay::parse("abc").is_err());
+    }
+
+    #[test]
+    fn day_type_serializes_to_lowercase() {
+        assert_eq!(serde_json::to_string(&DayType::Work).unwrap(), "\"work\"");
+        assert_eq!(serde_json::to_string(&DayType::Vacation).unwrap(), "\"vacation\"");
+        assert_eq!(serde_json::to_string(&DayType::Disabled).unwrap(), "\"disabled\"");
     }
 }

@@ -184,7 +184,7 @@ mod tests {
     use super::*;
     use crate::domain::logic::{default_settings, minutes_to_label, signed_minutes_to_label};
     use crate::domain::types::{
-        BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay,
+        BreakMinutes, DayEntry, DayId, DayLabel, DayType, OvertimeThresholdMinutes, TimeOfDay,
         TravelDeductionMinutes, WeekId, WeekStartDate, WorkInterval,
     };
 
@@ -200,6 +200,7 @@ mod tests {
             enabled,
             has_departure_deduction: false,
             has_return_deduction: false,
+            day_type: if enabled { DayType::Work } else { DayType::Disabled },
         }
     }
 

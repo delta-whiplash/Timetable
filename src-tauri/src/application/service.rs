@@ -15,7 +15,7 @@ use crate::{
         errors::{ApplicationError, StorageError, ValidationError},
         logic::{default_entries, minutes_to_label, summarize_week},
         types::{
-            AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel,
+            AppSettings, BreakMinutes, ConfiguredDay, DayEntry, DayId, DayLabel, DayType,
             OvertimeThresholdMinutes, TimeOfDay, TravelDeductionMinutes, WeekId, WeekSheet,
             WeekStartDate, WorkInterval,
         },
@@ -314,6 +314,7 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
         enabled: input.enabled,
         has_departure_deduction: input.has_departure_deduction,
         has_return_deduction: input.has_return_deduction,
+        day_type: if input.enabled { DayType::Work } else { DayType::Disabled },
     })
 }
 
