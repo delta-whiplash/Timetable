@@ -109,6 +109,13 @@ export interface WeeklyTrendPoint {
   totalMinutes: number;
 }
 
+export interface WeekAnalyticsPoint {
+  weekStart: string;
+  weekNumber: number;
+  effectiveMinutes: number;
+  consumedOvertimeMinutes: number;
+}
+
 export interface MonthlyStatsView {
   month: string;
   totalLabel: string;
@@ -120,4 +127,5 @@ export interface AnalyticsDataView {
   weeklyTrends: WeeklyTrendPoint[];
   monthlyStats: MonthlyStatsView[];
   totalWeeks: number;
+  weeklyCurves: WeekAnalyticsPoint[];
 }

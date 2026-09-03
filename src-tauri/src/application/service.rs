@@ -6,7 +6,7 @@ use crate::{
     application::{
         dto::{
             settings_to_view, week_to_view, AnalyticsDataView, BootstrapState, DeleteWeekInput,
-            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekListItem,
+            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekAnalyticsPoint, WeekListItem,
             WeekSelectorInput, WeekSheetView,
         },
         export::{build_export_sheet, sheet_to_xlsx},
@@ -186,6 +186,7 @@ impl ApplicationService {
         let day_of_week_stats = self.store.get_day_of_week_stats()?;
         let weekly_trends = self.store.get_weekly_trends()?;
         let monthly_stats = self.store.get_monthly_stats()?;
+        let weekly_curves = self.store.get_weekly_curves()?;
 
         let total_weeks = self.store.list_weeks()?.len() as u32;
 
@@ -194,6 +195,7 @@ impl ApplicationService {
             weekly_trends,
             monthly_stats,
             total_weeks,
+            weekly_curves,
         })
     }
 
