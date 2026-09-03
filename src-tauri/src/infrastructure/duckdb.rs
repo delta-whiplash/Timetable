@@ -151,13 +151,13 @@ impl DuckDb {
         ))?;
 
         // Migration: ajouter les colonnes déplacement aux tables existantes
-        // (IGNORE erreur si la colonne existe déjà)
+        // Utilise des transactions séparées et ignore les erreurs silencieusement
         let _ = connection.execute(
-            "ALTER TABLE day_entries ADD COLUMN has_departure_deduction INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE day_entries ADD COLUMN IF NOT EXISTS has_departure_deduction INTEGER DEFAULT 0",
             [],
         );
         let _ = connection.execute(
-            "ALTER TABLE day_entries ADD COLUMN has_return_deduction INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE day_entries ADD COLUMN IF NOT EXISTS has_return_deduction INTEGER DEFAULT 0",
             [],
         );
 
