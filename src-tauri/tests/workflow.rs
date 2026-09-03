@@ -47,6 +47,7 @@ fn save_settings_does_not_retroactively_change_past_week_threshold() {
             overtime_threshold_minutes: 2100,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -126,6 +127,7 @@ fn delete_week_is_transactional() {
             overtime_threshold_minutes: 2100,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -186,6 +188,7 @@ fn list_weeks_returns_real_updated_at() {
             overtime_threshold_minutes: 2100,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -237,6 +240,7 @@ fn save_week_returns_fresh_balance() {
             overtime_threshold_minutes: 2100,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -277,6 +281,7 @@ fn resolve_active_week_falls_back_on_invalid_week() {
             overtime_threshold_minutes: 2100,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -331,6 +336,7 @@ fn saves_week_and_updates_summary() {
             travel_deduction_minutes: 30,
             entries: vec![
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 0,
                     label: "Lundi".to_string(),
                     enabled: true,
@@ -341,6 +347,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 1,
                     label: "Mardi".to_string(),
                     enabled: true,
@@ -351,6 +358,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 2,
                     label: "Mercredi".to_string(),
                     enabled: false,
@@ -361,6 +369,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 3,
                     label: "Jeudi".to_string(),
                     enabled: false,
@@ -371,6 +380,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 4,
                     label: "Vendredi".to_string(),
                     enabled: false,
@@ -381,6 +391,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 5,
                     label: "Samedi".to_string(),
                     enabled: false,
@@ -391,6 +402,7 @@ fn saves_week_and_updates_summary() {
                     has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                     day_id: 6,
                     label: "Dimanche".to_string(),
                     enabled: false,
@@ -458,6 +470,7 @@ fn exports_week_as_xlsx() {
             overtime_threshold_minutes: 35 * 60,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -538,6 +551,7 @@ fn week_navigation_does_not_persist_template() {
             overtime_threshold_minutes: 35 * 60,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -619,6 +633,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
             overtime_threshold_minutes: 35 * 60,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
@@ -640,6 +655,7 @@ fn save_with_stale_week_id_adopts_existing_week() {
             overtime_threshold_minutes: 35 * 60,
             travel_deduction_minutes: 30,
             entries: vec![SaveWeekDayEntryInput {
+                day_type: Some("work".to_string()),
                 day_id: 0,
                 label: "Lundi".to_string(),
                 enabled: true,
