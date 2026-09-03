@@ -75,14 +75,17 @@ impl ApplicationService {
             week.week_id = existing.week_id;
         }
 
-        // Valide (via summarize) et construit la vue avant toute écriture
-        let view = self.week_to_view_with_balance(&week)?;
+        // Valide la semaine avant écriture (fail-closed si invalide)
+        summarize_week(&week)?;
 
         self.store.save_week(&week)?;
         let mut settings = self.get_settings()?;
         settings.active_week_id = Some(week.week_id.clone());
         self.persist_settings(&settings)?;
         info!(week_id = %week.week_id.0, "week saved");
+
+        // Construit la vue APRÈS sauvegarde pour avoir un solde cumulé frais
+        let view = self.week_to_view_with_balance(&week)?;
         Ok(view)
     }
 
@@ -107,7 +110,7 @@ impl ApplicationService {
                     total_minutes: summary.total_minutes,
                     total_label: minutes_to_label(summary.total_minutes),
                     worked_days: summary.worked_days,
-                    updated_at: format!("{} 00:00", week.week_start.as_string()),
+                    updated_at: week.updated_at,
                 })
             })
             .collect::<Result<Vec<_>, ValidationError>>()
@@ -144,10 +147,16 @@ impl ApplicationService {
 
         self.persist_settings(&settings)?;
 
+        // Rétro-écrire le seuil UNIQUEMENT si la semaine active est la semaine courante
+        // Sinon on modifie l'historique passé, ce qui invalide les exports précédents
         if let Some(active_week_id) = settings.active_week_id.clone() {
-            if let Some(mut week) = self.store.get_week_by_id(&active_week_id)? {
-                week.overtime_threshold = settings.overtime_threshold;
-                self.store.save_week(&week)?;
+            if let Some(week) = self.store.get_week_by_id(&active_week_id)? {
+                let today = WeekStartDate::today();
+                if week.week_start == today {
+                    let mut updated_week = week;
+                    updated_week.overtime_threshold = settings.overtime_threshold;
+                    self.store.save_week(&updated_week)?;
+                }
             }
         }
 
@@ -196,8 +205,11 @@ impl ApplicationService {
 
     fn resolve_active_week(&self, settings: &AppSettings) -> Result<WeekSheetView, ApplicationError> {
         if let Some(active_week_id) = &settings.active_week_id {
-            if let Some(week) = self.store.get_week_by_id(active_week_id)? {
-                return self.week_to_view_with_balance(&week);
+            if let Ok(Some(week)) = self.store.get_week_by_id(active_week_id) {
+                // Si la semaine est invalide (corrompue), fallback sur today
+                if let Ok(view) = self.week_to_view_with_balance(&week) {
+                    return Ok(view);
+                }
             }
         }
 
@@ -225,6 +237,7 @@ impl ApplicationService {
             week_start,
             entries: default_entries(settings),
             overtime_threshold: settings.overtime_threshold,
+            updated_at: String::new(),
         };
 
         let mut next_settings = settings.clone();
@@ -246,6 +259,7 @@ impl ApplicationService {
             week_start: WeekStartDate::parse(&input.week_start)?,
             entries,
             overtime_threshold,
+            updated_at: String::new(),
         })
     }
 }

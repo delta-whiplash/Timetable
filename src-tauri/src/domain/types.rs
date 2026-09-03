@@ -159,6 +159,7 @@ pub struct WeekSheet {
     pub week_start: WeekStartDate,
     pub entries: Vec<DayEntry>,
     pub overtime_threshold: OvertimeThresholdMinutes,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -46,7 +46,7 @@ impl DuckDb {
 
     fn load_week(&self, connection: &Connection, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id, week_start, overtime_threshold_minutes FROM weeks WHERE id = ?1",
+            "SELECT id, week_start, overtime_threshold_minutes, updated_at FROM weeks WHERE id = ?1",
         ))?;
 
         let mut rows = map_storage_error(statement.query(params![week_id.0]))?;
@@ -57,6 +57,7 @@ impl DuckDb {
         let stored_week_id: String = map_storage_error(row.get(0))?;
         let week_start: String = map_storage_error(row.get(1))?;
         let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
+        let updated_at: String = map_storage_error(row.get(3))?;
 
         let entries = self.load_entries(connection, &stored_week_id)?;
 
@@ -65,6 +66,7 @@ impl DuckDb {
             week_start: WeekStartDate::parse(&week_start).map_err(|_| StorageError::SerializationFailed)?,
             entries,
             overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+            updated_at,
         }))
     }
 
@@ -184,7 +186,7 @@ impl DuckDb {
     pub fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
         let connection = open_connection(&self.database_path)?;
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT id, week_start, overtime_threshold_minutes FROM weeks WHERE week_start = ?1",
+            "SELECT id, week_start, overtime_threshold_minutes, updated_at FROM weeks WHERE week_start = ?1",
         ))?;
         let mut rows = map_storage_error(statement.query(params![week_start.as_string()]))?;
         let Some(row) = map_storage_error(rows.next())? else {
@@ -194,6 +196,7 @@ impl DuckDb {
         let week_id: String = map_storage_error(row.get(0))?;
         let stored_week_start: String = map_storage_error(row.get(1))?;
         let overtime_threshold_minutes: u16 = map_storage_error(row.get(2))?;
+        let updated_at: String = map_storage_error(row.get(3))?;
         let entries = self.load_entries(&connection, &week_id)?;
 
         Ok(Some(WeekSheet {
@@ -202,6 +205,7 @@ impl DuckDb {
                 .map_err(|_| StorageError::SerializationFailed)?,
             entries,
             overtime_threshold: OvertimeThresholdMinutes(overtime_threshold_minutes),
+            updated_at,
         }))
     }
 
@@ -256,7 +260,7 @@ impl DuckDb {
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
-                w.id, w.week_start, w.overtime_threshold_minutes,
+                w.id, w.week_start, w.overtime_threshold_minutes, w.updated_at,
                 de.day_id, de.label, de.enabled, de.start_minutes, de.end_minutes, de.break_minutes
              FROM weeks w
              LEFT JOIN day_entries de ON w.id = de.week_id
@@ -272,22 +276,24 @@ impl DuckDb {
             if weeks.last().map(|week| week.week_id.0.as_str()) != Some(week_id_str.as_str()) {
                 let week_start_str: String = map_storage_error(row.get(1))?;
                 let overtime_threshold: u16 = map_storage_error(row.get(2))?;
+                let updated_at: String = map_storage_error(row.get(3))?;
                 weeks.push(WeekSheet {
                     week_id: WeekId(week_id_str.clone()),
                     week_start: WeekStartDate::parse(&week_start_str)
                         .map_err(|_| StorageError::SerializationFailed)?,
                     entries: Vec::new(),
                     overtime_threshold: OvertimeThresholdMinutes(overtime_threshold),
+                    updated_at,
                 });
             }
 
             // LEFT JOIN can have NULL day columns for a week without entries
-            if let Ok(Some(day_id)) = row.get::<_, Option<u8>>(3) {
-                let label: String = map_storage_error(row.get(4))?;
-                let enabled: bool = map_storage_error(row.get(5))?;
-                let start_minutes: Option<u16> = map_storage_error(row.get(6))?;
-                let end_minutes: Option<u16> = map_storage_error(row.get(7))?;
-                let break_minutes: u16 = map_storage_error(row.get(8))?;
+            if let Ok(Some(day_id)) = row.get::<_, Option<u8>>(4) {
+                let label: String = map_storage_error(row.get(5))?;
+                let enabled: bool = map_storage_error(row.get(6))?;
+                let start_minutes: Option<u16> = map_storage_error(row.get(7))?;
+                let end_minutes: Option<u16> = map_storage_error(row.get(8))?;
+                let break_minutes: u16 = map_storage_error(row.get(9))?;
 
                 weeks.last_mut().expect("week pushed above").entries.push(DayEntry {
                     day_id: DayId(day_id),
@@ -303,12 +309,17 @@ impl DuckDb {
     }
 
     pub fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
-        map_storage_error(connection.execute(
-            "DELETE FROM day_entries WHERE week_id = ?1",
-            params![week_id.0],
-        ))?;
-        map_storage_error(connection.execute("DELETE FROM weeks WHERE id = ?1", params![week_id.0]))?;
+        let mut connection = open_connection(&self.database_path)?;
+        let transaction = connection.transaction().map_err(|_| StorageError::QueryFailed)?;
+
+        transaction
+            .execute("DELETE FROM day_entries WHERE week_id = ?1", params![week_id.0])
+            .map_err(|_| StorageError::QueryFailed)?;
+        transaction
+            .execute("DELETE FROM weeks WHERE id = ?1", params![week_id.0])
+            .map_err(|_| StorageError::QueryFailed)?;
+
+        transaction.commit().map_err(|_| StorageError::QueryFailed)?;
         Ok(())
     }
 
@@ -586,6 +597,7 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
 
         store.save_week(&week).expect("save");
@@ -625,6 +637,7 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
 
         store.save_week(&week).expect("save");
@@ -650,6 +663,7 @@ mod tests {
             week_start: WeekStartDate::today(),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
         store.save_week(&week1).expect("save week1");
 
@@ -658,6 +672,7 @@ mod tests {
             week_start: WeekStartDate::parse("2024-01-15").expect("parse date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
         store.save_week(&week2).expect("save week2");
 
@@ -698,12 +713,14 @@ mod balance_tests {
             week_start: WeekStartDate::parse("2030-01-07").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
         let week2 = WeekSheet {
             week_id: WeekId::new(),
             week_start: WeekStartDate::parse("2030-01-14").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(3000),
+        updated_at: String::new(),
         };
         store.save_week(&week1).expect("save w1");
         store.save_week(&week2).expect("save w2");
@@ -733,6 +750,7 @@ mod balance_tests {
             week_start: WeekStartDate::parse("2030-01-07").expect("date"),
             entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         };
         store.save_week(&week).expect("save");
 
@@ -781,6 +799,7 @@ mod analytics_consistency_tests {
             week_start: WeekStartDate::parse(week_start).expect("date"),
             entries,
             overtime_threshold: OvertimeThresholdMinutes(2100),
+        updated_at: String::new(),
         }
     }
 

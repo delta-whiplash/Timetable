@@ -212,6 +212,7 @@ mod tests {
                 day(6, "Dimanche", None, 0, false),
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        updated_at: String::new(),
         }
     }
 

@@ -197,6 +197,7 @@ mod tests {
                 build_day(1, 480, 1020, 30),
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+        updated_at: String::new(),
         };
 
         let summary = summarize_week(&sheet).expect("summary should be valid");
