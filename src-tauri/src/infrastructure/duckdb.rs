@@ -403,23 +403,64 @@ impl DuckDb {
     }
 
     pub fn get_cumulative_balance(&self, up_to_week_start: &WeekStartDate) -> Result<i32, StorageError> {
-        // Calcul en Rust, source de vérité unique. Le SQL précédent
-        // additionnait silencieusement les deltas négatifs (si une ligne
-        // corrompue en base avait end < start, il mentait). La version
-        // Rust passe par summarize_week/validate_day : une ligne invalide
-        // fait échouer proprement le calcul.
-        let weeks = self.list_weeks()?;
-        let mut balance: i32 = 0;
-        for week in weeks {
-            if week.week_start.0 > up_to_week_start.0 {
-                continue;
-            }
-            let total = crate::domain::logic::summarize_week(&week)
-                .map_err(|_| StorageError::SerializationFailed)?
-                .total_minutes;
-            balance += i32::from(total) - i32::from(week.overtime_threshold.0);
+        // Agrégat SQL : ne désérialise plus tout l'historique en WeekSheet
+        // (l'ancienne version passait par list_weeks() + summarize_week en
+        // Rust, coût O(historique) à chaque save). La sémantique fail-closed
+        // de validate_day est reproduite en deux temps :
+        // 1. détection des lignes invalides sur les semaines <= up_to
+        //    (label vide — même jour désactivé ; activé sans horaires ;
+        //    fin <= début ; pause >= durée) -> erreur propre, pas de mensonge ;
+        // 2. SUM des deltas hebdo uniquement si aucune ligne n'est invalide.
+        let connection = self.shared()?;
+
+        let mut validation = map_storage_error(connection.prepare(
+            "SELECT 1
+             FROM day_entries de
+             JOIN weeks w ON w.id = de.week_id
+             WHERE w.week_start <= ?1
+               AND (
+                     trim(de.label) = ''
+                     OR (de.enabled = 1
+                         AND (de.start_minutes IS NULL
+                              OR de.end_minutes IS NULL
+                              OR de.end_minutes <= de.start_minutes
+                              OR de.break_minutes >= de.end_minutes - de.start_minutes))
+                   )
+             LIMIT 1",
+        ))?;
+        let mut validation_rows = map_storage_error(validation.query(params![up_to_week_start.as_string()]))?;
+        if map_storage_error(validation_rows.next())?.is_some() {
+            return Err(StorageError::SerializationFailed);
         }
-        Ok(balance)
+        drop(validation_rows);
+        drop(validation);
+
+        let mut statement = map_storage_error(connection.prepare(
+            "SELECT COALESCE(SUM(week_total - overtime_threshold_minutes), 0)
+             FROM (
+                 SELECT w.overtime_threshold_minutes,
+                     SUM(CASE
+                         WHEN de.enabled = 1
+                              AND de.start_minutes IS NOT NULL
+                              AND de.end_minutes IS NOT NULL
+                         THEN GREATEST(0,
+                              de.end_minutes - de.start_minutes - de.break_minutes
+                              - CASE WHEN COALESCE(de.has_departure_deduction, 0) = 1 THEN 30 ELSE 0 END
+                              - CASE WHEN COALESCE(de.has_return_deduction, 0) = 1 THEN 30 ELSE 0 END)
+                         ELSE 0
+                     END) AS week_total
+                 FROM weeks w
+                 LEFT JOIN day_entries de ON w.id = de.week_id
+                 WHERE w.week_start <= ?1
+                 GROUP BY w.id, w.overtime_threshold_minutes
+             ) per_week",
+        ))?;
+        let mut rows = map_storage_error(statement.query(params![up_to_week_start.as_string()]))?;
+        let Some(row) = map_storage_error(rows.next())? else {
+            return Ok(0);
+        };
+        let balance: i64 = map_storage_error(row.get(0))?;
+        Ok(balance.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
     }
 
     pub fn ensure_default_settings(&self) -> Result<(), StorageError> {
@@ -1131,5 +1172,209 @@ mod analytics_consistency_tests {
             lundi.average_minutes, 0,
             "minutes negatives clampées à 0, jamais propagees dans la moyenne"
         );
+    }
+}
+
+#[cfg(test)]
+mod balance_sql_equivalence_tests {
+    use duckdb::params;
+    use tempfile::tempdir;
+
+    use crate::{
+        domain::{
+            logic::{default_entries, default_settings},
+            types::{BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, WeekId, WeekSheet, WeekStartDate, WorkInterval},
+        },
+        infrastructure::duckdb::DuckDb,
+    };
+
+    fn store() -> (tempfile::TempDir, DuckDb) {
+        let dir = tempdir().expect("dir");
+        let store = DuckDb::new(dir.path().join("balance_sql.duckdb"));
+        store.migrate().expect("migrations");
+        (dir, store)
+    }
+
+    /// Lundi désactivé avec un intervalle inversé conservé en base.
+    fn disabled_inverted_monday() -> DayEntry {
+        DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: Some(WorkInterval {
+                start: TimeOfDay(17 * 60),
+                end: TimeOfDay(8 * 60),
+            }),
+            break_minutes: BreakMinutes(0),
+            enabled: false,
+            has_departure_deduction: false,
+            has_return_deduction: false,
+        }
+    }
+
+    fn week_with(monday: DayEntry, week_start: &str) -> WeekSheet {
+        let mut entries = default_entries(&default_settings());
+        entries[0] = monday;
+        WeekSheet {
+            week_id: Some(WeekId::new()),
+            week_start: WeekStartDate::parse(week_start).expect("date"),
+            entries,
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn travel_deductions_reduce_balance_like_rust() {
+        // Chaque tick de deduction (depart/retour) retire 30 min du jour,
+        // sature a 0 : l'agregat SQL doit suivre summarize_week a la lettre.
+        let (_dir, store) = store();
+        let mut monday = DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: Some(WorkInterval {
+                start: TimeOfDay(8 * 60),
+                end: TimeOfDay(17 * 60),
+            }),
+            break_minutes: BreakMinutes(0),
+            enabled: true,
+            has_departure_deduction: true,
+            has_return_deduction: true,
+        };
+        let week = week_with(monday.clone(), "2030-01-07");
+        store.save_week(&week).expect("save");
+
+        // Attendu : la boucle Rust (summarize_week) sur la meme feuille.
+        let mut sheet = week_with(disabled_inverted_monday(), "2030-01-07");
+        sheet.entries[0] = monday;
+        let expected = i32::from(
+            crate::domain::logic::summarize_week(&sheet).expect("s").total_minutes,
+        ) - 2100;
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"));
+        assert_eq!(balance.expect("balance"), expected);
+    }
+
+    #[test]
+    fn disabled_day_with_inverted_interval_counts_zero() {
+        // Un jour désactivé garde son intervalle en base même invalide :
+        // validate_day retourne Ok, le jour compte pour 0 minute.
+        let (_dir, store) = store();
+        let week = week_with(disabled_inverted_monday(), "2030-01-07");
+        store.save_week(&week).expect("save");
+
+        let mut expected_week = week_with(disabled_inverted_monday(), "2030-01-07");
+        expected_week.entries[0].interval = None;
+        let expected = i32::from(
+            crate::domain::logic::summarize_week(&expected_week).expect("s").total_minutes,
+        ) - 2100;
+
+        let balance = store
+            .get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"))
+            .expect("balance");
+        assert_eq!(balance, expected);
+    }
+
+    #[test]
+    fn invalid_row_in_future_week_is_not_validated() {
+        // summarize_week ne tourne que sur les semaines <= up_to :
+        // une corruption après la date demandée ne doit pas faire échouer.
+        let (_dir, store) = store();
+        let week = week_with(disabled_inverted_monday(), "2030-01-07");
+        // activer le lundi invalide puis le corrompre n'est pas nécessaire :
+        // on corrompt une semaine future directement
+        let future = week_with(disabled_inverted_monday(), "2030-03-04");
+        store.save_week(&week).expect("save past");
+        store.save_week(&future).expect("save future");
+        {
+            let guard = store.raw_connection();
+            let conn = guard.as_ref().expect("connexion partagée");
+            conn.execute(
+                "UPDATE day_entries SET enabled = 1 WHERE week_id = ?1 AND day_id = 0",
+                params![future.week_id.as_ref().expect("id").0],
+            )
+            .expect("corrupt future");
+        }
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2030-02-01").expect("date"));
+        assert!(balance.is_ok(), "semaine future non validée, reçu {balance:?}");
+    }
+
+    #[test]
+    fn empty_label_fails_even_when_day_disabled() {
+        // validate_day vérifie le label AVANT le flag enabled.
+        let (_dir, store) = store();
+        let week = week_with(disabled_inverted_monday(), "2030-01-07");
+        store.save_week(&week).expect("save");
+        {
+            let guard = store.raw_connection();
+            let conn = guard.as_ref().expect("connexion partagée");
+            conn.execute(
+                "UPDATE day_entries SET label = '' WHERE week_id = ?1 AND day_id = 2",
+                params![week.week_id.as_ref().expect("id").0],
+            )
+            .expect("empty label");
+        }
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"));
+        assert!(balance.is_err(), "label vide => erreur, reçu {balance:?}");
+    }
+
+    #[test]
+    fn break_exceeds_day_fails() {
+        // enabled avec break >= durée : BreakExceedsDay côté Rust.
+        let (_dir, store) = store();
+        let monday = DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: Some(WorkInterval {
+                start: TimeOfDay(8 * 60),
+                end: TimeOfDay(17 * 60),
+            }),
+            break_minutes: BreakMinutes(9 * 60),
+            enabled: true,
+            has_departure_deduction: false,
+            has_return_deduction: false,
+        };
+        let week = week_with(monday, "2030-01-07");
+        store.save_week(&week).expect("save");
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"));
+        assert!(balance.is_err(), "pause >= durée => erreur, reçu {balance:?}");
+    }
+
+    #[test]
+    fn large_history_balance_matches_rust_computation() {
+        // Équivalence agrégat SQL vs boucle Rust sur 60 semaines à seuils mixtes.
+        let (_dir, store) = store();
+        let mut expected: i32 = 0;
+        for i in 0..60 {
+            let date = chrono::NaiveDate::from_ymd_opt(2030, 1, 7).expect("date")
+                + chrono::Duration::weeks(i);
+            let week_start = date.format("%Y-%m-%d").to_string();
+            let sheet = WeekSheet {
+                week_id: Some(WeekId::new()),
+                week_start: WeekStartDate::parse(&week_start).expect("date"),
+                entries: default_entries(&default_settings()),
+                overtime_threshold: OvertimeThresholdMinutes(if i % 2 == 0 { 2100 } else { 1950 }),
+                updated_at: String::new(),
+            };
+            let total = i32::from(
+                crate::domain::logic::summarize_week(&sheet).expect("s").total_minutes,
+            );
+            // Le solde ne compte que les semaines <= up_to (2031-01-01) :
+            // les 8 dernières semaines de l'historique sont hors périmètre.
+            if i <= 51 {
+                expected += total - i32::from(if i % 2 == 0 { 2100 } else { 1950 });
+            }
+            store.save_week(&sheet).expect("save");
+        }
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2031-01-01").expect("date"));
+        assert_eq!(balance.expect("balance"), expected);
     }
 }
