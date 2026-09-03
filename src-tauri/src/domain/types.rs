@@ -144,6 +144,10 @@ pub struct DayEntry {
     pub interval: Option<WorkInterval>,
     pub break_minutes: BreakMinutes,
     pub enabled: bool,
+    /// Déduction 30min sur l'heure de départ (déplacement domicile-travail)
+    pub has_departure_deduction: bool,
+    /// Déduction 30min sur l'heure de retour (déplacement travail-domicile)
+    pub has_return_deduction: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

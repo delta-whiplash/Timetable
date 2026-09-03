@@ -17,6 +17,8 @@ pub struct SaveWeekDayEntryInput {
     pub start: Option<String>,
     pub end: Option<String>,
     pub break_time: String,
+    pub has_departure_deduction: bool,
+    pub has_return_deduction: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,8 @@ pub struct DayEntryView {
     pub start: Option<String>,
     pub end: Option<String>,
     pub break_time: String,
+    pub has_departure_deduction: bool,
+    pub has_return_deduction: bool,
     pub total_minutes: u16,
     pub total_label: String,
 }
@@ -208,6 +212,8 @@ pub fn week_to_view(
                 start: entry.interval.as_ref().map(|interval| interval.start.to_hhmm()),
                 end: entry.interval.as_ref().map(|interval| interval.end.to_hhmm()),
                 break_time: crate::domain::types::TimeOfDay(entry.break_minutes.0).to_hhmm(),
+                has_departure_deduction: entry.has_departure_deduction,
+                has_return_deduction: entry.has_return_deduction,
                 total_minutes,
                 total_label: minutes_to_label(total_minutes),
             })

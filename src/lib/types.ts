@@ -7,6 +7,8 @@ export interface DayEntryView {
   start: string | null;
   end: string | null;
   breakTime: string;
+  hasDepartureDeduction: boolean;
+  hasReturnDeduction: boolean;
   totalMinutes: number;
   totalLabel: string;
 }
@@ -63,6 +65,8 @@ export interface SaveWeekDayEntryInput {
   start: string | null;
   end: string | null;
   breakTime: string;
+  hasDepartureDeduction: boolean;
+  hasReturnDeduction: boolean;
 }
 
 export interface SaveWeekInput {

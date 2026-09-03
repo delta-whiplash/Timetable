@@ -198,6 +198,8 @@ mod tests {
             }),
             break_minutes: BreakMinutes(break_minutes),
             enabled,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         }
     }
 
