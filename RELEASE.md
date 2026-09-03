@@ -8,13 +8,13 @@ The easiest way to create a release is using the release script:
 
 ```bash
 # For patch release (0.9.0 -> 0.9.1)
-npm run release:patch
+pnpm run release:patch
 
 # For minor release (0.9.0 -> 0.10.0)
-npm run release:minor
+pnpm run release:minor
 
 # For major release (0.9.0 -> 1.0.0)
-npm run release:major
+pnpm run release:major
 ```
 
 The script will automatically:
@@ -32,14 +32,14 @@ If you prefer to do it manually:
 
 ```bash
 # 1. Bump version (choose one)
-npm version patch  # 0.9.0 -> 0.9.1
-npm version minor  # 0.9.0 -> 0.10.0
-npm version major  # 0.9.0 -> 1.0.0
+pnpm version patch  # 0.9.0 -> 0.9.1
+pnpm version minor  # 0.9.0 -> 0.10.0
+pnpm version major  # 0.9.0 -> 1.0.0
 
 # 2. Update Cargo.toml and tauri.conf.json manually to match
 
 # 3. Commit
-git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 git commit -m "chore: bump version to X.Y.Z"
 
 # 4. Create and push tag
@@ -78,7 +78,7 @@ We follow [Semantic Versioning](https://semver.org/):
 
 Before creating a release:
 
-- [ ] All tests pass locally (`npm test` and `cargo test`)
+- [ ] All tests pass locally (`pnpm test` and `cargo test`)
 - [ ] You're on the main branch
 - [ ] No uncommitted changes
 - [ ] CHANGELOG.md is updated (if you maintain one)
@@ -125,7 +125,7 @@ To test the build locally before releasing:
 
 ```bash
 # Build for current platform
-npm run tauri:build
+pnpm run tauri:build
 
 # Installer will be in:
 # - Windows: src-tauri/target/release/bundle/nsis/*.exe

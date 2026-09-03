@@ -52,18 +52,28 @@ function createAppStore() {
     }
   }
 
-  async function persistWeek(input: SaveWeekInput) {
+  async function persistWeek(
+    input: SaveWeekInput,
+    opts: { refreshHistory?: boolean } = {}
+  ) {
     update((state) => ({ ...state, savingWeek: true, error: null }));
     try {
-      await saveWeek(input);
-      // Recharger l'activeWeek pour obtenir les totaux recalculés par le backend
-      const bootstrapState = await loadBootstrap();
+      // save_week retourne la vue recalculée (totaux, solde) :
+      // inutile de recharger le bootstrap complet derrière.
+      const activeWeek = await saveWeek(input);
       update((state) => ({
         ...state,
-        activeWeek: bootstrapState.activeWeek,
         savingWeek: false,
+        // La réponse peut arriver après un switch de semaine : ne l'appliquer
+        // que si la semaine sauvegardée est toujours celle affichée.
+        activeWeek:
+          state.activeWeek?.weekId === activeWeek.weekId
+            ? activeWeek
+            : state.activeWeek
       }));
-      await refreshHistoryOnly();
+      if (opts.refreshHistory) {
+        await refreshHistoryOnly();
+      }
     } catch (error) {
       update((state) => ({ ...state, savingWeek: false, error: toCommandError(error) }));
     }

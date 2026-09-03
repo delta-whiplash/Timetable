@@ -52,6 +52,8 @@ fn save_settings_does_not_retroactively_change_past_week_threshold() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save past week");
@@ -126,6 +128,8 @@ fn delete_week_is_transactional() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save week");
@@ -183,6 +187,8 @@ fn list_weeks_returns_real_updated_at() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save week");
@@ -231,6 +237,8 @@ fn save_week_returns_fresh_balance() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "00:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save week");
@@ -268,6 +276,8 @@ fn resolve_active_week_falls_back_on_invalid_week() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save week");
@@ -319,6 +329,8 @@ fn saves_week_and_updates_summary() {
                     start: Some("08:00".to_string()),
                     end: Some("18:00".to_string()),
                     break_time: "01:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 1,
@@ -327,6 +339,8 @@ fn saves_week_and_updates_summary() {
                     start: Some("08:00".to_string()),
                     end: Some("17:30".to_string()),
                     break_time: "00:30".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 2,
@@ -335,6 +349,8 @@ fn saves_week_and_updates_summary() {
                     start: None,
                     end: None,
                     break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 3,
@@ -343,6 +359,8 @@ fn saves_week_and_updates_summary() {
                     start: None,
                     end: None,
                     break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 4,
@@ -351,6 +369,8 @@ fn saves_week_and_updates_summary() {
                     start: None,
                     end: None,
                     break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 5,
@@ -359,6 +379,8 @@ fn saves_week_and_updates_summary() {
                     start: None,
                     end: None,
                     break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 },
                 SaveWeekDayEntryInput {
                     day_id: 6,
@@ -367,6 +389,8 @@ fn saves_week_and_updates_summary() {
                     start: None,
                     end: None,
                     break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
                 }
             ],
         })
@@ -429,6 +453,8 @@ fn exports_week_as_xlsx() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save week before export");
@@ -506,6 +532,8 @@ fn week_navigation_does_not_persist_template() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("explicit save");
@@ -582,6 +610,8 @@ fn save_with_stale_week_id_adopts_existing_week() {
                 start: Some("08:00".to_string()),
                 end: Some("18:00".to_string()),
                 break_time: "01:00".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save A");
@@ -600,6 +630,8 @@ fn save_with_stale_week_id_adopts_existing_week() {
                 start: Some("09:00".to_string()),
                 end: Some("17:00".to_string()),
                 break_time: "00:30".to_string(),
+                has_departure_deduction: false,
+                has_return_deduction: false,
             }],
         })
         .expect("save B adopte la semaine existante");
