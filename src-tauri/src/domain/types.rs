@@ -1,4 +1,4 @@
-use chrono::{Datelike, NaiveDate, Utc};
+use chrono::{Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,7 +30,9 @@ impl WeekStartDate {
     }
 
     pub fn today() -> Self {
-        Self::normalized(Utc::now().date_naive())
+        // Heure locale : la semaine active doit suivre le calendrier de
+        // l'utilisateur, pas UTC (sinon lundi 00h30 a Paris = dimanche en UTC).
+        Self::normalized(Local::now().date_naive())
     }
 
     pub fn normalized(date: NaiveDate) -> Self {
@@ -225,6 +227,13 @@ pub fn default_configured_days() -> Vec<ConfiguredDay> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn today_est_toujours_un_lundi() {
+        // Garantit que today() reste normalisée au lundi de la semaine locale
+        let today = WeekStartDate::today();
+        assert_eq!(today.0.weekday().num_days_from_monday(), 0);
+    }
 
     #[test]
     fn test_parse_time_formats() {
