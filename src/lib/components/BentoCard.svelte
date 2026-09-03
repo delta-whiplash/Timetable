@@ -85,6 +85,16 @@
           aria-label="Début +30 minutes"
         >+</button>
       </div>
+      <label class="bento-card-deplacement">
+        <input
+          type="checkbox"
+          class="bento-card-deplacement-checkbox"
+          checked={entry.hasDepartureDeduction}
+          disabled={disabled || !entry.enabled}
+          on:change={(e) => updateField("hasDepartureDeduction", e.currentTarget.checked)}
+        />
+        <span class="bento-card-deplacement-label">Départ 30min</span>
+      </label>
     </div>
 
     <div class="bento-card-time">
@@ -108,6 +118,16 @@
           aria-label="Fin +30 minutes"
         >+</button>
       </div>
+      <label class="bento-card-deplacement">
+        <input
+          type="checkbox"
+          class="bento-card-deplacement-checkbox"
+          checked={entry.hasReturnDeduction}
+          disabled={disabled || !entry.enabled}
+          on:change={(e) => updateField("hasReturnDeduction", e.currentTarget.checked)}
+        />
+        <span class="bento-card-deplacement-label">Retour 30min</span>
+      </label>
     </div>
   </div>
 
@@ -228,6 +248,33 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 500;
+  }
+
+  .bento-card-deplacement {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    cursor: pointer;
+  }
+
+  .bento-card-deplacement-checkbox {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--color-primary);
+  }
+
+  .bento-card-deplacement-checkbox:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .bento-card-deplacement-label {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
   /* Footer */

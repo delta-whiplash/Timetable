@@ -57,7 +57,9 @@
         enabled: entry.enabled,
         start: entry.start,
         end: entry.end,
-        breakTime: entry.breakTime
+        breakTime: entry.breakTime,
+        hasDepartureDeduction: entry.hasDepartureDeduction,
+        hasReturnDeduction: entry.hasReturnDeduction
       }))
     };
   }

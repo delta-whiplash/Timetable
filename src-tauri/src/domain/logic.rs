@@ -37,6 +37,8 @@ pub fn default_entries(settings: &super::types::AppSettings) -> Vec<DayEntry> {
             },
             break_minutes: settings.default_break_minutes,
             enabled: day.enabled,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         })
         .collect()
 }
@@ -83,7 +85,18 @@ pub fn calculate_day_minutes(entry: &DayEntry) -> Result<u16, ValidationError> {
         return Ok(0);
     };
 
-    Ok(interval.end.0 - interval.start.0 - entry.break_minutes.0)
+    let mut net = i32::from(interval.end.0 - interval.start.0 - entry.break_minutes.0);
+
+    // Déductions déplacement (30min par tick actif)
+    if entry.has_departure_deduction {
+        net -= 30;
+    }
+    if entry.has_return_deduction {
+        net -= 30;
+    }
+
+    // Saturer à 0 (pas de temps négatif)
+    Ok(net.max(0) as u16)
 }
 
 pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError> {
@@ -184,6 +197,8 @@ mod tests {
             }),
             break_minutes: BreakMinutes(break_minutes),
             enabled: true,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         }
     }
 
@@ -242,5 +257,42 @@ mod tests {
         let settings: AppSettings = default_settings();
         assert_eq!(settings.overtime_threshold.0, 2100);
         assert_eq!(settings.configured_days.len(), 7);
+    }
+
+    #[test]
+    fn departure_deduction_reduces_time_by_30min() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60); // 08:00-18:00, 60min break
+        // Sans déduction: 600 - 60 = 540min
+        assert_eq!(calculate_day_minutes(&entry).unwrap(), 540);
+
+        // Avec déduction départ: 540 - 30 = 510min
+        entry.has_departure_deduction = true;
+        assert_eq!(calculate_day_minutes(&entry).unwrap(), 510);
+    }
+
+    #[test]
+    fn return_deduction_reduces_time_by_30min() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        // Avec déduction retour: 540 - 30 = 510min
+        entry.has_return_deduction = true;
+        assert_eq!(calculate_day_minutes(&entry).unwrap(), 510);
+    }
+
+    #[test]
+    fn both_deductions_reduce_time_by_60min() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        // Avec les deux déductions: 540 - 60 = 480min (8h net)
+        entry.has_departure_deduction = true;
+        entry.has_return_deduction = true;
+        assert_eq!(calculate_day_minutes(&entry).unwrap(), 480);
+    }
+
+    #[test]
+    fn deduction_saturates_at_zero() {
+        let mut entry = build_day(0, 8 * 60, 9 * 60, 0); // 08:00-09:00, 0 break = 60min
+        entry.has_departure_deduction = true;
+        entry.has_return_deduction = true;
+        // 60 - 30 - 30 = 0 (saturé)
+        assert_eq!(calculate_day_minutes(&entry).unwrap(), 0);
     }
 }

@@ -302,6 +302,8 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
         interval,
         break_minutes,
         enabled: input.enabled,
+        has_departure_deduction: input.has_departure_deduction,
+        has_return_deduction: input.has_return_deduction,
     })
 }
 

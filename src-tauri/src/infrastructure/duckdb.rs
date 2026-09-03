@@ -72,7 +72,7 @@ impl DuckDb {
 
     fn load_entries(&self, connection: &Connection, week_id: &str) -> Result<Vec<DayEntry>, StorageError> {
         let mut statement = map_storage_error(connection.prepare(
-            "SELECT day_id, label, enabled, start_minutes, end_minutes, break_minutes
+            "SELECT day_id, label, enabled, start_minutes, end_minutes, break_minutes, has_departure_deduction, has_return_deduction
              FROM day_entries
              WHERE week_id = ?1
              ORDER BY day_id ASC",
@@ -87,6 +87,8 @@ impl DuckDb {
             let start_minutes: Option<u16> = map_storage_error(day_row.get(3))?;
             let end_minutes: Option<u16> = map_storage_error(day_row.get(4))?;
             let break_minutes: u16 = map_storage_error(day_row.get(5))?;
+            let has_departure_deduction: bool = map_storage_error(day_row.get::<_, Option<u8>>(6))?.unwrap_or(0) == 1;
+            let has_return_deduction: bool = map_storage_error(day_row.get::<_, Option<u8>>(7))?.unwrap_or(0) == 1;
 
             // Les horaires sont préservés même si le jour est désactivé
             // pour pouvoir les restaurer si l'utilisateur réactive le jour
@@ -96,6 +98,8 @@ impl DuckDb {
                 interval: parse_interval(start_minutes, end_minutes),
                 break_minutes: BreakMinutes(break_minutes),
                 enabled,
+                has_departure_deduction,
+                has_return_deduction,
             });
         }
 
@@ -124,6 +128,8 @@ impl DuckDb {
                 start_minutes INTEGER,
                 end_minutes INTEGER,
                 break_minutes INTEGER NOT NULL,
+                has_departure_deduction INTEGER NOT NULL DEFAULT 0,
+                has_return_deduction INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (week_id, day_id)
             )",
             [],
@@ -143,6 +149,17 @@ impl DuckDb {
             )",
             [],
         ))?;
+
+        // Migration: ajouter les colonnes déplacement aux tables existantes
+        // Utilise des transactions séparées et ignore les erreurs silencieusement
+        let _ = connection.execute(
+            "ALTER TABLE day_entries ADD COLUMN IF NOT EXISTS has_departure_deduction INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = connection.execute(
+            "ALTER TABLE day_entries ADD COLUMN IF NOT EXISTS has_return_deduction INTEGER DEFAULT 0",
+            [],
+        );
 
         // Dédoublonnage historique : garde la version la plus récente par semaine
         map_storage_error(connection.execute(
@@ -237,8 +254,8 @@ impl DuckDb {
                 .unwrap_or((None, None));
 
             map_storage_error(transaction.execute(
-                "INSERT INTO day_entries (week_id, day_id, label, enabled, start_minutes, end_minutes, break_minutes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO day_entries (week_id, day_id, label, enabled, start_minutes, end_minutes, break_minutes, has_departure_deduction, has_return_deduction)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     week.week_id.as_ref().expect("week_id must be set before save").0,
                     entry.day_id.0,
@@ -246,7 +263,9 @@ impl DuckDb {
                     entry.enabled,
                     start_minutes,
                     end_minutes,
-                    entry.break_minutes.0
+                    entry.break_minutes.0,
+                    entry.has_departure_deduction,
+                    entry.has_return_deduction
                 ],
             ))?;
         }
@@ -261,7 +280,7 @@ impl DuckDb {
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
                 w.id, w.week_start, w.overtime_threshold_minutes, w.updated_at,
-                de.day_id, de.label, de.enabled, de.start_minutes, de.end_minutes, de.break_minutes
+                de.day_id, de.label, de.enabled, de.start_minutes, de.end_minutes, de.break_minutes, de.has_departure_deduction, de.has_return_deduction
              FROM weeks w
              LEFT JOIN day_entries de ON w.id = de.week_id
              ORDER BY w.week_start DESC, de.day_id ASC"
@@ -294,6 +313,8 @@ impl DuckDb {
                 let start_minutes: Option<u16> = map_storage_error(row.get(7))?;
                 let end_minutes: Option<u16> = map_storage_error(row.get(8))?;
                 let break_minutes: u16 = map_storage_error(row.get(9))?;
+                let has_departure_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(10))?.unwrap_or(0) == 1;
+                let has_return_deduction: bool = map_storage_error(row.get::<_, Option<u8>>(11))?.unwrap_or(0) == 1;
 
                 weeks.last_mut().expect("week pushed above").entries.push(DayEntry {
                     day_id: DayId(day_id),
@@ -301,6 +322,8 @@ impl DuckDb {
                     interval: parse_interval(start_minutes, end_minutes),
                     break_minutes: BreakMinutes(break_minutes),
                     enabled,
+                    has_departure_deduction,
+                    has_return_deduction,
                 });
             }
         }
@@ -445,7 +468,11 @@ impl DuckDb {
                             AND de.start_minutes IS NOT NULL
                             AND de.end_minutes IS NOT NULL
                             AND de.end_minutes > de.start_minutes
-                        THEN GREATEST(0, de.end_minutes - de.start_minutes - COALESCE(de.break_minutes, 0))
+                        THEN GREATEST(0,
+                            de.end_minutes - de.start_minutes - COALESCE(de.break_minutes, 0)
+                            - 30 * COALESCE(de.has_departure_deduction, 0)
+                            - 30 * COALESCE(de.has_return_deduction, 0)
+                        )
                         ELSE 0
                     END
                 ), 0) as total_minutes
@@ -492,7 +519,11 @@ impl DuckDb {
                         WHEN de.enabled = 1
                             AND de.start_minutes IS NOT NULL
                             AND de.end_minutes IS NOT NULL
-                        THEN GREATEST(0, de.end_minutes - de.start_minutes - de.break_minutes)
+                        THEN GREATEST(0,
+                            de.end_minutes - de.start_minutes - de.break_minutes
+                            - 30 * COALESCE(de.has_departure_deduction, 0)
+                            - 30 * COALESCE(de.has_return_deduction, 0)
+                        )
                         ELSE 0
                     END
                 ), 0) as total_minutes
@@ -533,7 +564,11 @@ impl DuckDb {
                         WHEN de.enabled = 1
                             AND de.start_minutes IS NOT NULL
                             AND de.end_minutes IS NOT NULL
-                        THEN GREATEST(0, de.end_minutes - de.start_minutes - de.break_minutes)
+                        THEN GREATEST(0,
+                            de.end_minutes - de.start_minutes - de.break_minutes
+                            - 30 * COALESCE(de.has_departure_deduction, 0)
+                            - 30 * COALESCE(de.has_return_deduction, 0)
+                        )
                         ELSE 0
                     END
                 ), 0) as total_minutes
@@ -814,6 +849,8 @@ mod analytics_consistency_tests {
             }),
             break_minutes: BreakMinutes(0),
             enabled: true,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         }
     }
 
@@ -825,6 +862,8 @@ mod analytics_consistency_tests {
             interval: None,
             break_minutes: BreakMinutes(0),
             enabled: false,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         }
     }
 
