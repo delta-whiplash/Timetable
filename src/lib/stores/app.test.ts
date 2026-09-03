@@ -14,11 +14,14 @@ vi.mock("$lib/api", () => ({
   getAnalytics: vi.fn()
 }));
 
-import { loadBootstrap, saveSettings } from "$lib/api";
+import { loadBootstrap, listWeeks, saveSettings, saveWeek, createOrSwitchWeek } from "$lib/api";
 import { appStore } from "./app";
 
 const mockedBootstrap = vi.mocked(loadBootstrap);
 const mockedSaveSettings = vi.mocked(saveSettings);
+const mockedSaveWeek = vi.mocked(saveWeek);
+const mockedListWeeks = vi.mocked(listWeeks);
+const mockedSwitch = vi.mocked(createOrSwitchWeek);
 
 const ACTIVE_WEEK = {
   weekId: "w1",
@@ -92,6 +95,94 @@ describe("appStore.persistSettings", () => {
     expect(snapshot).toEqual({ percentage: 128, balance: "+10h00" });
     expect(mockedBootstrap).toHaveBeenCalledTimes(2);
 
+    unsubscribe();
+  });
+});
+
+describe("appStore.persistWeek", () => {
+  const SAVE_INPUT = {
+    weekId: "w1",
+    weekStart: "2026-08-31",
+    overtimeThresholdMinutes: 2100,
+    entries: []
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedBootstrap.mockResolvedValue({ activeWeek: ACTIVE_WEEK });
+    mockedListWeeks.mockResolvedValue([]);
+  });
+
+  it("met à jour la semaine active depuis la vue retournée par save_week, sans recharger le bootstrap", async () => {
+    const SAVED_WEEK = {
+      ...ACTIVE_WEEK,
+      summary: {
+        totalLabel: "45h30",
+        percentage: 128,
+        cumulativeBalanceMinutes: 600,
+        cumulativeBalanceLabel: "+10h00"
+      }
+    };
+    mockedSaveWeek.mockResolvedValue(SAVED_WEEK);
+
+    await appStore.bootstrap();
+    await appStore.persistWeek(SAVE_INPUT);
+
+    // save_week retourne déjà la vue avec les totaux recalculés :
+    // un appel à load_bootstrap serait un IPC + un scan d'historique superflus
+    expect(mockedBootstrap).toHaveBeenCalledTimes(1); // bootstrap() initial uniquement
+    expect(mockedSaveWeek).toHaveBeenCalledTimes(1);
+
+    let activePercentage: number | null = null;
+    const unsubscribe = appStore.subscribe((state) => {
+      if (state.activeWeek) {
+        activePercentage = state.activeWeek.summary.percentage;
+      }
+    });
+    expect(activePercentage).toBe(128);
+    unsubscribe();
+  });
+
+  it("ne rafraîchit pas l'historique par défaut (scan complet évité)", async () => {
+    mockedSaveWeek.mockResolvedValue(ACTIVE_WEEK);
+
+    await appStore.bootstrap();
+    mockedListWeeks.mockClear(); // bootstrap() charge déjà l'historique
+    await appStore.persistWeek(SAVE_INPUT);
+
+    expect(mockedListWeeks).not.toHaveBeenCalled();
+  });
+
+  it("rafraîchit l'historique quand demandé (onglet historique visible)", async () => {
+    mockedSaveWeek.mockResolvedValue(ACTIVE_WEEK);
+
+    await appStore.bootstrap();
+    mockedListWeeks.mockClear(); // bootstrap() charge déjà l'historique
+    await appStore.persistWeek(SAVE_INPUT, { refreshHistory: true });
+
+    expect(mockedListWeeks).toHaveBeenCalledTimes(1);
+  });
+
+  it("une réponse de save tardive n'écrase pas la semaine affichée après un switch", async () => {
+    let resolveSave: (week: typeof ACTIVE_WEEK) => void;
+    mockedSaveWeek.mockImplementation(
+      () => new Promise((resolve) => (resolveSave = resolve))
+    );
+    const OTHER_WEEK = { ...ACTIVE_WEEK, weekId: "w2", weekStart: "2026-09-07" };
+    mockedSwitch.mockResolvedValue(OTHER_WEEK);
+
+    await appStore.bootstrap();
+    const saving = appStore.persistWeek(SAVE_INPUT); // save de w1 en vol
+    await appStore.switchWeek("2026-09-07"); // l'utilisateur change de semaine
+
+    resolveSave!(ACTIVE_WEEK); // la réponse de w1 arrive après le switch
+    await saving;
+
+    let activeWeekId: string | null = null;
+    const unsubscribe = appStore.subscribe((state) => {
+      if (state.activeWeek) activeWeekId = state.activeWeek.weekId;
+    });
+    expect(activeWeekId).toBe("w2");
     unsubscribe();
   });
 });

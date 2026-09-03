@@ -7,6 +7,7 @@
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import { appStore } from "$lib/stores/app";
+  import { SaveScheduler } from "$lib/saveScheduler";
   import { initialAppState, type AppState } from "$lib/stores/state";
   import type {
     DayEntryView,
@@ -18,9 +19,14 @@
   let state: AppState = initialAppState();
   let activeTab: "timesheet" | "history" | "analytics" | "settings" = "timesheet";
 
-  // Debounce pour l'autosave
-  let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+  // Debounce court pour l'autosave : le save part tôt sans jamais bloquer l'édition
+  type SaveInput = NonNullable<ReturnType<typeof buildSaveInput>>;
   let hasPendingChanges = false;
+  const saveScheduler = new SaveScheduler<SaveInput>({
+    save: (input) =>
+      appStore.persistWeek(input, { refreshHistory: activeTab === "history" }),
+    onPendingChange: (pending) => (hasPendingChanges = pending)
+  });
 
   const unsubscribe = appStore.subscribe((value: AppState) => {
     state = value;
@@ -34,7 +40,7 @@
   });
 
   onDestroy(() => {
-    if (saveTimeout) clearTimeout(saveTimeout); // Cleanup du timer
+    saveScheduler.destroy(); // Cleanup du timer
     unsubscribe();
   });
 
@@ -56,26 +62,10 @@
     };
   }
 
-  function saveDraft(entries: DayEntryView[], immediate = false) {
+  function saveDraft(entries: DayEntryView[]) {
     const input = buildSaveInput(entries);
     if (!input) return;
-
-    if (immediate) {
-      // Save immédiat (sans debounce)
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = null;
-      hasPendingChanges = false;
-      void appStore.persistWeek(input);
-    } else {
-      // Save avec debounce
-      hasPendingChanges = true;
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => {
-        saveTimeout = null;
-        hasPendingChanges = false;
-        void appStore.persistWeek(input);
-      }, 2500);
-    }
+    saveScheduler.schedule(input);
   }
 
   function updateEntry(next: DayEntryView) {
@@ -88,38 +78,45 @@
     saveDraft(entries);
   }
 
-  // Force le save immédiat des modifications en attente
-  async function flushPendingChanges(): Promise<void> {
-    if (!hasPendingChanges || !state.activeWeek) return;
-    hasPendingChanges = false; // Reset avant save pour éviter race
-    if (saveTimeout) {
-      clearTimeout(saveTimeout);
-      saveTimeout = null;
-    }
-    const input = buildSaveInput(state.activeWeek.entries);
-    if (input) await appStore.persistWeek(input);
+  // Déclenche le save immédiat des modifications en attente, sans bloquer la suite :
+  // le save part en vol (le store ignore la réponse si la semaine affichée a changé).
+  function flushPendingChanges(): void {
+    void saveScheduler.flush();
   }
 
-  async function handleWeekChange(weekStart: string) {
-    await flushPendingChanges(); // Save immédiat avant changement
-    await appStore.switchWeek(weekStart);
+  function handleWeekChange(weekStart: string) {
+    flushPendingChanges();
+    void appStore.switchWeek(weekStart);
   }
 
-  async function handleOpenFromHistory(weekStart: string) {
-    await flushPendingChanges(); // Save immédiat avant changement
-    await appStore.switchWeek(weekStart);
+  function handleOpenFromHistory(weekStart: string) {
+    flushPendingChanges();
+    void appStore.switchWeek(weekStart);
     activeTab = "timesheet"; // Basculer vers l'onglet timesheet
   }
 
-  async function setTab(tab: typeof activeTab) {
-    await flushPendingChanges(); // Save immédiat avant changement d'onglet
+  function setTab(tab: typeof activeTab) {
+    flushPendingChanges();
     activeTab = tab;
+  }
+
+  // Perte de contexte (blur, onglet caché) : save immédiat pour ne rien perdre
+  function handlePotentialContextLoss() {
+    void saveScheduler.flush();
+  }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+      handlePotentialContextLoss();
+    }
   }
 </script>
 
 <svelte:head>
   <title>Timetable Desktop</title>
 </svelte:head>
+
+<svelte:window on:blur={handlePotentialContextLoss} on:visibilitychange={handleVisibilityChange} />
 
 {#if state.loading && !state.bootstrapped}
   <main class="shell shell--centered">
@@ -160,13 +157,13 @@
                 class="export-button"
                 type="button"
                 on:click={() => appStore.triggerExport(state.activeWeek!.weekStart)}
-                disabled={state.savingWeek || state.switchingWeek}
+                disabled={state.switchingWeek}
               >
                 ⬇ Exporter
               </button>
               <WeekSelector
                 weekStart={state.activeWeek.weekStart}
-                disabled={state.savingWeek || state.switchingWeek}
+                disabled={state.switchingWeek}
                 on:change={(e) => handleWeekChange(e.detail)}
               />
             </div>
@@ -177,7 +174,6 @@
             <div class="content-body">
               <BentoGrid
                 entries={state.activeWeek.entries}
-                disabled={state.savingWeek}
                 defaultStart={state.settings?.defaultStart ?? "08:00"}
                 defaultEnd={state.settings?.defaultEnd ?? "18:00"}
                 defaultBreak={state.settings?.defaultBreak ?? "01:00"}
