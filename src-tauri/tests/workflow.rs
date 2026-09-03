@@ -9,8 +9,8 @@ use timetable_desktop_lib::{
     },
     domain::{
         errors::{ApplicationError, StorageError},
-        logic::default_settings,
-        types::WeekStartDate,
+        logic::{default_entries, default_settings},
+        types::{OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
     },
     infrastructure::duckdb::DuckDb,
 };
@@ -235,4 +235,87 @@ fn week_navigation_does_not_persist_template() {
             .expect("query")
             .is_some()
     );
+}
+
+#[test]
+fn duplicate_week_start_fails_at_db_level() {
+    let temp_dir = tempdir().expect("temp dir");
+    let store = DuckDb::new(temp_dir.path().join("dup.duckdb"));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+
+    let week = WeekSheet {
+        week_id: WeekId("premiere".to_string()),
+        week_start: WeekStartDate::parse("2030-02-04").expect("date"),
+        entries: default_entries(&default_settings()),
+        overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+    };
+    store.save_week(&week).expect("première semaine");
+
+    // Deuxième semaine, id différent, même week_start : la base doit refuser
+    // (sinon le solde cumulé compte deux fois les mêmes heures)
+    let doublon = WeekSheet {
+        week_id: WeekId("deuxieme".to_string()),
+        week_start: WeekStartDate::parse("2030-02-04").expect("date"),
+        entries: default_entries(&default_settings()),
+        overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+    };
+    let result = store.save_week(&doublon);
+    assert!(
+        matches!(result, Err(StorageError::QueryFailed)),
+        "le doublon doit être rejeté par la contrainte UNIQUE, reçu: {result:?}"
+    );
+
+    // Une seule semaine en base
+    assert_eq!(store.list_weeks().expect("list").len(), 1);
+}
+
+#[test]
+fn save_with_stale_week_id_adopts_existing_week() {
+    let temp_dir = tempdir().expect("temp dir");
+    let store = Arc::new(DuckDb::new(temp_dir.path().join("adopt.duckdb")));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+    let service = ApplicationService::new(store.clone());
+
+    // Sauvegarde normale : id A
+    service
+        .save_week(SaveWeekInput {
+            week_id: "id-A".to_string(),
+            week_start: "2030-03-04".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            entries: vec![SaveWeekDayEntryInput {
+                day_id: 0,
+                label: "Lundi".to_string(),
+                enabled: true,
+                start: Some("08:00".to_string()),
+                end: Some("18:00".to_string()),
+                break_time: "01:00".to_string(),
+            }],
+        })
+        .expect("save A");
+
+    // Sauvegarde depuis un état obsolète (id B inconnu, même semaine) :
+    // doit ADOPTER la ligne existante au lieu d'erreur ou de créer un doublon
+    let view = service
+        .save_week(SaveWeekInput {
+            week_id: "id-B".to_string(),
+            week_start: "2030-03-04".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            entries: vec![SaveWeekDayEntryInput {
+                day_id: 0,
+                label: "Lundi".to_string(),
+                enabled: true,
+                start: Some("09:00".to_string()),
+                end: Some("17:00".to_string()),
+                break_time: "00:30".to_string(),
+            }],
+        })
+        .expect("save B adopte la semaine existante");
+
+    assert_eq!(view.week_id, "id-A");
+    let weeks = store.list_weeks().expect("list");
+    assert_eq!(weeks.len(), 1, "une seule semaine, pas de doublon");
 }

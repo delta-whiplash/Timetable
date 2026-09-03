@@ -67,7 +67,14 @@ impl ApplicationService {
     }
 
     pub fn save_week(&self, input: SaveWeekInput) -> Result<WeekSheetView, ApplicationError> {
-        let week = self.parse_week_input(input)?;
+        let mut week = self.parse_week_input(input)?;
+
+        // Id obsolète (fenêtre périmée, double instance) : adopte la ligne
+        // existante de la même semaine au lieu de violer l'index unique.
+        if let Some(existing) = self.store.get_week_by_start(&week.week_start)? {
+            week.week_id = existing.week_id;
+        }
+
         // Valide (via summarize) et construit la vue avant toute écriture
         let view = self.week_to_view_with_balance(&week)?;
 

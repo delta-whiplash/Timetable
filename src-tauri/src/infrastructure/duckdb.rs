@@ -142,6 +142,37 @@ impl DuckDb {
             [],
         ))?;
 
+        // Dédoublonnage historique : garde la version la plus récente par semaine
+        map_storage_error(connection.execute(
+            "DELETE FROM day_entries WHERE week_id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY week_start ORDER BY updated_at DESC
+                    ) AS rn
+                    FROM weeks
+                ) WHERE rn > 1
+            )",
+            [],
+        ))?;
+        map_storage_error(connection.execute(
+            "DELETE FROM weeks WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY week_start ORDER BY updated_at DESC
+                    ) AS rn
+                    FROM weeks
+                ) WHERE rn > 1
+            )",
+            [],
+        ))?;
+
+        // Une semaine = une date de début : sans cette contrainte, le solde
+        // cumulé peut compter deux fois les mêmes heures.
+        map_storage_error(connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeks_week_start ON weeks(week_start)",
+            [],
+        ))?;
+
         Ok(())
     }
 
