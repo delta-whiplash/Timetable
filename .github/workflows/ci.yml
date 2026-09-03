@@ -64,6 +64,11 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Set MSVC compiler flags
+        run: |
+          echo "CXXFLAGS=/std:c++17 /EHsc" >> $env:GITHUB_ENV
+          echo "CFLAGS=/EHsc" >> $env:GITHUB_ENV
+
       - name: Check desktop build wiring
         working-directory: src-tauri
         run: cargo check
