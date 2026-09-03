@@ -39,7 +39,7 @@ jobs:
   build-windows:
     name: Build Windows
     needs: test
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1

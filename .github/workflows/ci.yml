@@ -43,7 +43,7 @@ jobs:
         run: cargo test --no-default-features
 
   windows-desktop:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7.0.1
 
