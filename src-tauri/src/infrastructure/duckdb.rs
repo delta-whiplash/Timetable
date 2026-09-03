@@ -411,7 +411,7 @@ impl DuckDb {
         //    (label vide — même jour désactivé ; activé sans horaires ;
         //    fin <= début ; pause >= durée) -> erreur propre, pas de mensonge ;
         // 2. SUM des deltas hebdo uniquement si aucune ligne n'est invalide.
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut validation = map_storage_error(connection.prepare(
             "SELECT 1
@@ -443,7 +443,10 @@ impl DuckDb {
                          WHEN de.enabled = 1
                               AND de.start_minutes IS NOT NULL
                               AND de.end_minutes IS NOT NULL
-                         THEN de.end_minutes - de.start_minutes - de.break_minutes
+                         THEN GREATEST(0,
+                              de.end_minutes - de.start_minutes - de.break_minutes
+                              - CASE WHEN COALESCE(de.has_departure_deduction, 0) = 1 THEN 30 ELSE 0 END
+                              - CASE WHEN COALESCE(de.has_return_deduction, 0) = 1 THEN 30 ELSE 0 END)
                          ELSE 0
                      END) AS week_total
                  FROM weeks w
@@ -1132,6 +1135,8 @@ mod balance_sql_equivalence_tests {
             }),
             break_minutes: BreakMinutes(0),
             enabled: false,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         }
     }
 
@@ -1145,6 +1150,38 @@ mod balance_sql_equivalence_tests {
             overtime_threshold: OvertimeThresholdMinutes(2100),
             updated_at: String::new(),
         }
+    }
+
+    #[test]
+    fn travel_deductions_reduce_balance_like_rust() {
+        // Chaque tick de deduction (depart/retour) retire 30 min du jour,
+        // sature a 0 : l'agregat SQL doit suivre summarize_week a la lettre.
+        let (_dir, store) = store();
+        let mut monday = DayEntry {
+            day_id: DayId(0),
+            label: DayLabel("Lundi".to_string()),
+            interval: Some(WorkInterval {
+                start: TimeOfDay(8 * 60),
+                end: TimeOfDay(17 * 60),
+            }),
+            break_minutes: BreakMinutes(0),
+            enabled: true,
+            has_departure_deduction: true,
+            has_return_deduction: true,
+        };
+        let week = week_with(monday.clone(), "2030-01-07");
+        store.save_week(&week).expect("save");
+
+        // Attendu : la boucle Rust (summarize_week) sur la meme feuille.
+        let mut sheet = week_with(disabled_inverted_monday(), "2030-01-07");
+        sheet.entries[0] = monday;
+        let expected = i32::from(
+            crate::domain::logic::summarize_week(&sheet).expect("s").total_minutes,
+        ) - 2100;
+
+        let balance =
+            store.get_cumulative_balance(&WeekStartDate::parse("2030-06-01").expect("date"));
+        assert_eq!(balance.expect("balance"), expected);
     }
 
     #[test]
@@ -1179,7 +1216,8 @@ mod balance_sql_equivalence_tests {
         store.save_week(&week).expect("save past");
         store.save_week(&future).expect("save future");
         {
-            let conn = duckdb::Connection::open(&store.database_path).expect("open");
+            let guard = store.raw_connection();
+            let conn = guard.as_ref().expect("connexion partagée");
             conn.execute(
                 "UPDATE day_entries SET enabled = 1 WHERE week_id = ?1 AND day_id = 0",
                 params![future.week_id.as_ref().expect("id").0],
@@ -1199,7 +1237,8 @@ mod balance_sql_equivalence_tests {
         let week = week_with(disabled_inverted_monday(), "2030-01-07");
         store.save_week(&week).expect("save");
         {
-            let conn = duckdb::Connection::open(&store.database_path).expect("open");
+            let guard = store.raw_connection();
+            let conn = guard.as_ref().expect("connexion partagée");
             conn.execute(
                 "UPDATE day_entries SET label = '' WHERE week_id = ?1 AND day_id = 2",
                 params![week.week_id.as_ref().expect("id").0],
@@ -1216,7 +1255,7 @@ mod balance_sql_equivalence_tests {
     fn break_exceeds_day_fails() {
         // enabled avec break >= durée : BreakExceedsDay côté Rust.
         let (_dir, store) = store();
-        let mut monday = DayEntry {
+        let monday = DayEntry {
             day_id: DayId(0),
             label: DayLabel("Lundi".to_string()),
             interval: Some(WorkInterval {
@@ -1225,8 +1264,9 @@ mod balance_sql_equivalence_tests {
             }),
             break_minutes: BreakMinutes(9 * 60),
             enabled: true,
+            has_departure_deduction: false,
+            has_return_deduction: false,
         };
-        let _ = &mut monday;
         let week = week_with(monday, "2030-01-07");
         store.save_week(&week).expect("save");
 
