@@ -35,6 +35,18 @@ pub fn sheet_to_xlsx(sheet: &ExportSheet) -> Vec<u8> {
         .set_background_color(Color::RGB(0xDCE6F1));
 
     let mut workbook = Workbook::new();
+
+    // Propriétés figées : deux exports du meme état produisent des bytes
+    // identiques (indispensable pour l'audit). Sans ça, docProps/core.xml
+    // embarque Utc::now() et fait varier le hash à chaque export.
+    use chrono::TimeZone;
+    let fixed_epoch = chrono::Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap();
+    let properties = rust_xlsxwriter::DocProperties::new()
+        .set_title(&sheet.title)
+        .set_author("Timetable Desktop")
+        .set_creation_datetime(&fixed_epoch);
+    workbook.set_properties(&properties);
+
     let worksheet = workbook.add_worksheet();
     worksheet.set_name("Semaine").expect("nom de feuille");
 
@@ -300,5 +312,15 @@ mod tests {
         autre.rows[0][6] = "8h00".to_string();
         let bytes_b = sheet_to_xlsx(&autre);
         assert_ne!(bytes_a, bytes_b);
+    }
+
+    #[test]
+    fn le_meme_export_deux_fois_produit_le_meme_fichier() {
+        // Pour l'audit : deux exports du meme etat doivent etre byte-identiques.
+        // Sinon le hash change et ressemble a de la falsification.
+        let first = sheet_to_xlsx(&sheet(150));
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let second = sheet_to_xlsx(&sheet(150));
+        assert_eq!(first, second, "deux exports a 2s d'intervalle doivent etre byte-identiques");
     }
 }
