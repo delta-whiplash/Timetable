@@ -1,8 +1,8 @@
 use super::{
     errors::ValidationError,
     types::{
-        default_configured_days, BreakMinutes, ConfiguredDay, DayEntry, ThemePreference,
-        WeekSheet, WeekSummary, WorkInterval,
+        default_configured_days, BreakMinutes, DayEntry, ThemePreference, WeekSheet,
+        WeekSummary, WorkInterval,
     },
 };
 
@@ -18,30 +18,24 @@ pub fn minutes_to_human_label(minutes: u16) -> String {
     }
 }
 
-pub fn default_interval() -> WorkInterval {
-    WorkInterval {
-        start: super::types::TimeOfDay(8 * 60),
-        end: super::types::TimeOfDay(18 * 60),
-    }
-}
-
-pub fn default_break() -> BreakMinutes {
-    BreakMinutes(60)
-}
-
 pub fn default_theme() -> ThemePreference {
     ThemePreference::Dark
 }
 
-pub fn default_entries(configured_days: &[ConfiguredDay]) -> Vec<DayEntry> {
-    configured_days
+pub fn default_entries(settings: &super::types::AppSettings) -> Vec<DayEntry> {
+    settings
+        .configured_days
         .iter()
         .cloned()
         .map(|day| DayEntry {
             day_id: day.day_id,
             label: day.label,
-            interval: if day.enabled { Some(default_interval()) } else { None },
-            break_minutes: default_break(),
+            interval: if day.enabled {
+                Some(settings.default_work_interval)
+            } else {
+                None
+            },
+            break_minutes: settings.default_break_minutes,
             enabled: day.enabled,
         })
         .collect()
@@ -134,8 +128,11 @@ pub fn default_settings() -> super::types::AppSettings {
     super::types::AppSettings {
         overtime_threshold: super::types::OvertimeThresholdMinutes(35 * 60),
         theme: default_theme(),
-        default_work_interval: default_interval(),
-        default_break_minutes: default_break(),
+        default_work_interval: WorkInterval {
+            start: super::types::TimeOfDay(8 * 60),
+            end: super::types::TimeOfDay(18 * 60),
+        },
+        default_break_minutes: BreakMinutes(60),
         configured_days: default_configured_days(),
         active_week_id: None,
     }
@@ -148,8 +145,34 @@ mod tests {
     use super::*;
     use crate::domain::types::{
         AppSettings, BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay,
-        WeekId, WeekSheet, WeekStartDate, WorkInterval,
+        ThemePreference, WeekId, WeekSheet, WeekStartDate, WorkInterval,
     };
+
+    #[test]
+    fn default_entries_honorent_les_parametres_utilisateur() {
+        // Un utilisateur qui configure 07:00-15:00 / 45 min de pause
+        // doit voir SES valeurs dans les nouvelles semaines, pas 08:00-18:00 / 60.
+        let settings = AppSettings {
+            overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+            theme: ThemePreference::Dark,
+            default_work_interval: WorkInterval {
+                start: TimeOfDay(7 * 60),
+                end: TimeOfDay(15 * 60),
+            },
+            default_break_minutes: BreakMinutes(45),
+            configured_days: default_configured_days(),
+            active_week_id: None,
+        };
+
+        let entries = default_entries(&settings);
+
+        let lundi = &entries[0];
+        assert_eq!(lundi.interval.expect("jour actif").start.0, 7 * 60);
+        assert_eq!(lundi.interval.expect("jour actif").end.0, 15 * 60);
+        assert_eq!(lundi.break_minutes.0, 45);
+        // Samedi désactivé : pas d'intervalle
+        assert!(entries[5].interval.is_none());
+    }
 
     fn build_day(day_id: u8, start: u16, end: u16, break_minutes: u16) -> DayEntry {
         DayEntry {

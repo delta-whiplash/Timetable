@@ -216,7 +216,7 @@ impl ApplicationService {
         let week = WeekSheet {
             week_id: WeekId::new(),
             week_start,
-            entries: default_entries(&settings.configured_days),
+            entries: default_entries(settings),
             overtime_threshold: settings.overtime_threshold,
         };
 

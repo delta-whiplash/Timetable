@@ -534,8 +534,8 @@ mod tests {
 
     use crate::{
         domain::{
-            logic::{default_entries, summarize_week},
-            types::{default_configured_days, OvertimeThresholdMinutes, WeekSheet, WeekStartDate},
+            logic::{default_entries, default_settings, summarize_week},
+            types::{OvertimeThresholdMinutes, WeekSheet, WeekStartDate},
         },
         infrastructure::duckdb::DuckDb,
     };
@@ -552,7 +552,7 @@ mod tests {
         let week = WeekSheet {
             week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
-            entries: default_entries(&default_configured_days()),
+            entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
 
@@ -591,7 +591,7 @@ mod tests {
         let week = WeekSheet {
             week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
-            entries: default_entries(&default_configured_days()),
+            entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
 
@@ -616,7 +616,7 @@ mod tests {
         let week1 = WeekSheet {
             week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::today(),
-            entries: default_entries(&default_configured_days()),
+            entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
         store.save_week(&week1).expect("save week1");
@@ -624,7 +624,7 @@ mod tests {
         let week2 = WeekSheet {
             week_id: crate::domain::types::WeekId::new(),
             week_start: WeekStartDate::parse("2024-01-15").expect("parse date"),
-            entries: default_entries(&default_configured_days()),
+            entries: default_entries(&default_settings()),
             overtime_threshold: OvertimeThresholdMinutes(2100),
         };
         store.save_week(&week2).expect("save week2");

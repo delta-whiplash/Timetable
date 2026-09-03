@@ -157,7 +157,7 @@ pub fn build_export_sheet(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::logic::{default_break, minutes_to_label, signed_minutes_to_label};
+    use crate::domain::logic::{default_settings, minutes_to_label, signed_minutes_to_label};
     use crate::domain::types::{
         BreakMinutes, DayEntry, DayId, DayLabel, OvertimeThresholdMinutes, TimeOfDay, WeekId,
         WeekStartDate, WorkInterval,
@@ -283,7 +283,7 @@ mod tests {
     fn pause_nulle_sur_jour_sans_horaire() {
         // La pause par défaut ne doit pas fuir sur le dimanche sans horaire
         assert_eq!(sheet(0).rows[6][4], "00:00");
-        assert_ne!(default_break(), BreakMinutes(0));
+        assert_ne!(default_settings().default_break_minutes, BreakMinutes(0));
     }
 
     #[test]
