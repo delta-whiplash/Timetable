@@ -41,8 +41,8 @@ const currentVersion = packageJson.version;
 console.log(`\nCurrent version: ${currentVersion}`);
 console.log(`Release type: ${releaseType}\n`);
 
-// Bump version using npm
-exec(`npm version ${releaseType} --no-git-tag-version`);
+// Bump version using pnpm
+exec(`pnpm version ${releaseType} --no-git-tag-version`);
 
 // Read new version
 const updatedPackageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
@@ -63,7 +63,7 @@ tauriConf.version = newVersion;
 writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n');
 
 // Commit version bump
-exec('git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json');
+exec('git add package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json');
 exec(`git commit -m "chore: bump version to ${newVersion}"`);
 
 // Create tag
