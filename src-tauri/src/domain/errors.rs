@@ -21,6 +21,8 @@ pub enum ValidationError {
     InvalidDayConfiguration,
     #[error("invalid_travel_deduction_minutes")]
     InvalidTravelDeductionMinutes { value: u16 },
+    #[error("invalid_day_type")]
+    InvalidDayType { value: String },
 }
 
 #[derive(Debug, Error, Clone)]
@@ -88,6 +90,9 @@ impl ApplicationError {
                 }
                 ValidationError::InvalidTravelDeductionMinutes { .. } => {
                     "La durée de déduction doit être entre 15 et 180 minutes."
+                }
+                ValidationError::InvalidDayType { .. } => {
+                    "Le type de jour doit être 'work', 'vacation' ou 'disabled'."
                 }
             },
             Self::Storage(StorageError::StorageUnavailable) => {

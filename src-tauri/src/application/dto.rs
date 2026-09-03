@@ -5,7 +5,7 @@ use crate::domain::{
         calculate_day_minutes, minutes_to_human_label, minutes_to_label, summarize_week,
         threshold_percentage,
     },
-    types::{AppSettings, ConfiguredDay, TimeOfDay, WeekSheet},
+    types::{AppSettings, ConfiguredDay, DayType, TimeOfDay, WeekSheet},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +19,7 @@ pub struct SaveWeekDayEntryInput {
     pub break_time: String,
     pub has_departure_deduction: bool,
     pub has_return_deduction: bool,
+    pub day_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +77,7 @@ pub struct DayEntryView {
     pub has_return_deduction: bool,
     pub total_minutes: u16,
     pub total_label: String,
+    pub day_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +244,11 @@ pub fn week_to_view(
                 has_return_deduction: entry.has_return_deduction,
                 total_minutes,
                 total_label: minutes_to_label(total_minutes),
+                day_type: match entry.day_type {
+                    DayType::Work => "work".to_string(),
+                    DayType::Vacation => "vacation".to_string(),
+                    DayType::Disabled => "disabled".to_string(),
+                },
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

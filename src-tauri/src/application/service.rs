@@ -289,7 +289,23 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
     let label = DayLabel::parse(day_id, &input.label)?;
     let break_minutes = crate::domain::types::BreakMinutes::parse(&input.break_time)?;
 
-    let interval = if input.enabled {
+    // Parse day_type with backward compatibility
+    let day_type = input.day_type
+        .as_deref()
+        .map(|s| match s {
+            "work" => Ok(DayType::Work),
+            "vacation" => Ok(DayType::Vacation),
+            "disabled" => Ok(DayType::Disabled),
+            _ => Err(ValidationError::InvalidDayType { value: s.to_string() }),
+        })
+        .transpose()?
+        .unwrap_or_else(|| if input.enabled {
+            DayType::Work
+        } else {
+            DayType::Disabled
+        });
+
+    let interval = if input.enabled && day_type == DayType::Work {
         let start = input
             .start
             .as_deref()
@@ -314,7 +330,7 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
         enabled: input.enabled,
         has_departure_deduction: input.has_departure_deduction,
         has_return_deduction: input.has_return_deduction,
-        day_type: if input.enabled { DayType::Work } else { DayType::Disabled },
+        day_type,
     })
 }
 
