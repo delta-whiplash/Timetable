@@ -1,4 +1,7 @@
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Utc;
 use duckdb::{params, Connection};
@@ -23,6 +26,23 @@ fn open_connection(path: &PathBuf) -> Result<Connection, StorageError> {
     Connection::open(path).map_err(|_| StorageError::StorageUnavailable)
 }
 
+/// Guard de la connexion partagée : se déréférence en `&Connection` /
+/// `&mut Connection` pour que les méthodes du store ne changent pas de forme.
+struct SharedConnection<'a>(MutexGuard<'a, Option<Connection>>);
+
+impl Deref for SharedConnection<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.0.as_ref().expect("connexion initialisée")
+    }
+}
+
+impl DerefMut for SharedConnection<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        self.0.as_mut().expect("connexion initialisée")
+    }
+}
+
 fn parse_interval(start_minutes: Option<u16>, end_minutes: Option<u16>) -> Option<WorkInterval> {
     match (start_minutes, end_minutes) {
         (Some(start), Some(end)) => Some(WorkInterval {
@@ -34,14 +54,50 @@ fn parse_interval(start_minutes: Option<u16>, end_minutes: Option<u16>) -> Optio
 }
 
 /// Stockage DuckDB : semaines, jours et paramètres de l'application.
+///
+/// Une connexion unique est ouverte paresseusement puis réutilisée par toutes
+/// les opérations : ouvrir un fichier DuckDB coûte cher (buffer pool,
+/// métadonnées, checksum) et dominait la latence de l'autosave (~8-10
+/// ouvertures par save débounced). Le `Mutex` sérialise les accès.
 #[derive(Clone)]
 pub struct DuckDb {
     pub database_path: PathBuf,
+    connection: Arc<Mutex<Option<Connection>>>,
+    open_count: Arc<AtomicUsize>,
 }
 
 impl DuckDb {
     pub fn new(database_path: PathBuf) -> Self {
-        Self { database_path }
+        Self {
+            database_path,
+            connection: Arc::new(Mutex::new(None)),
+            open_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Connexion partagée, ouverte au premier besoin.
+    fn shared(&self) -> Result<SharedConnection<'_>, StorageError> {
+        let mut guard = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::StorageUnavailable)?;
+        if guard.is_none() {
+            *guard = Some(open_connection(&self.database_path)?);
+            self.open_count.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(SharedConnection(guard))
+    }
+
+    /// Nombre d'ouvertures de fichier effectuées par ce store (tests).
+    #[cfg(test)]
+    pub(crate) fn connection_open_count(&self) -> usize {
+        self.open_count.load(Ordering::SeqCst)
+    }
+
+    /// Accès brut à la connexion partagée (corruption volontaire en tests).
+    #[cfg(test)]
+    pub(crate) fn raw_connection(&self) -> MutexGuard<'_, Option<Connection>> {
+        self.connection.lock().expect("verrou de la connexion")
     }
 
     fn load_week(&self, connection: &Connection, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
@@ -103,7 +159,7 @@ impl DuckDb {
     }
 
     pub fn migrate(&self) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         map_storage_error(connection.execute(
             "CREATE TABLE IF NOT EXISTS weeks (
@@ -179,12 +235,12 @@ impl DuckDb {
     }
 
     pub fn get_week_by_id(&self, week_id: &WeekId) -> Result<Option<WeekSheet>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
         self.load_week(&connection, week_id)
     }
 
     pub fn get_week_by_start(&self, week_start: &WeekStartDate) -> Result<Option<WeekSheet>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
         let mut statement = map_storage_error(connection.prepare(
             "SELECT id, week_start, overtime_threshold_minutes, updated_at FROM weeks WHERE week_start = ?1",
         ))?;
@@ -210,7 +266,7 @@ impl DuckDb {
     }
 
     pub fn save_week(&self, week: &WeekSheet) -> Result<(), StorageError> {
-        let mut connection = open_connection(&self.database_path)?;
+        let mut connection = self.shared()?;
         let transaction = map_storage_error(connection.transaction())?;
 
         map_storage_error(transaction.execute(
@@ -256,7 +312,7 @@ impl DuckDb {
     }
 
     pub fn list_weeks(&self) -> Result<Vec<WeekSheet>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
@@ -309,7 +365,7 @@ impl DuckDb {
     }
 
     pub fn delete_week(&self, week_id: &WeekId) -> Result<(), StorageError> {
-        let mut connection = open_connection(&self.database_path)?;
+        let mut connection = self.shared()?;
         let transaction = connection.transaction().map_err(|_| StorageError::QueryFailed)?;
 
         transaction
@@ -348,7 +404,7 @@ impl DuckDb {
         let configured_days_json =
             serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
 
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
         map_storage_error(connection.execute(
             "INSERT INTO settings
              (id, overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break, updated_at)
@@ -368,7 +424,7 @@ impl DuckDb {
     }
 
     pub fn load_settings(&self) -> Result<AppSettings, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
         let mut statement = map_storage_error(connection.prepare(
             "SELECT overtime_threshold_minutes, theme, configured_days_json, active_week_id, default_start, default_end, default_break
              FROM settings
@@ -404,7 +460,7 @@ impl DuckDb {
     }
 
     pub fn save_settings(&self, settings: &AppSettings) -> Result<(), StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
         let configured_days_json =
             serde_json::to_string(&settings.configured_days).map_err(|_| StorageError::SerializationFailed)?;
         map_storage_error(connection.execute(
@@ -429,7 +485,7 @@ impl DuckDb {
     }
 
     pub fn get_day_of_week_stats(&self) -> Result<Vec<DayOfWeekStats>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
@@ -482,7 +538,7 @@ impl DuckDb {
     }
 
     pub fn get_weekly_trends(&self) -> Result<Vec<WeeklyTrendPoint>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
@@ -522,7 +578,7 @@ impl DuckDb {
     }
 
     pub fn get_monthly_stats(&self) -> Result<Vec<MonthlyStatsView>, StorageError> {
-        let connection = open_connection(&self.database_path)?;
+        let connection = self.shared()?;
 
         let mut statement = map_storage_error(connection.prepare(
             "SELECT
@@ -568,6 +624,56 @@ impl DuckDb {
         // Inverser pour avoir l'ordre chronologique
         stats.reverse();
         Ok(stats)
+    }
+}
+
+#[cfg(test)]
+mod connection_reuse_tests {
+    use tempfile::tempdir;
+
+    use crate::{
+        domain::{
+            logic::{default_entries, default_settings},
+            types::{OvertimeThresholdMinutes, WeekId, WeekSheet, WeekStartDate},
+        },
+        infrastructure::duckdb::DuckDb,
+    };
+
+    #[test]
+    fn reuses_single_connection_across_operations() {
+        let temp_dir = tempdir().expect("temp dir");
+        let store = DuckDb::new(temp_dir.path().join("reuse.duckdb"));
+
+        store.migrate().expect("migrations");
+        let count_after_migrate = store.connection_open_count();
+        assert_eq!(count_after_migrate, 1, "migrate() ouvre la connexion partagée");
+
+        store.ensure_default_settings().expect("default settings");
+
+        let week = WeekSheet {
+            week_id: Some(WeekId::new()),
+            week_start: WeekStartDate::today(),
+            entries: default_entries(&default_settings()),
+            overtime_threshold: OvertimeThresholdMinutes(2100),
+            updated_at: String::new(),
+        };
+
+        store.save_week(&week).expect("save");
+        store
+            .get_week_by_id(week.week_id.as_ref().expect("persisted week must have id"))
+            .expect("load")
+            .expect("week should exist");
+        store.list_weeks().expect("list");
+        store.load_settings().expect("settings");
+
+        // Une seule ouverture pour servir toutes les opérations successives :
+        // rouvrir le fichier DuckDB à chaque appel coûte cher (buffer pool,
+        // métadonnées, checksum) et domine la latence de l'autosave.
+        assert_eq!(
+            store.connection_open_count(),
+            1,
+            "toutes les opérations doivent partager la connexion ouverte par migrate()"
+        );
     }
 }
 
@@ -689,7 +795,7 @@ mod tests {
 
 #[cfg(test)]
 mod balance_tests {
-    use duckdb::{params, Connection};
+    use duckdb::params;
     use tempfile::tempdir;
 
     use crate::{
@@ -754,11 +860,11 @@ mod balance_tests {
         };
         store.save_week(&week).expect("save");
 
-        // Corrompre via une connexion indépendante puis la fermer pour libérer
-        // le fichier (DuckDB interdit les connexions concurrentes sur le même
-        // fichier dans un même process).
+        // Corrompre via la connexion partagée du store (DuckDB interdit une
+        // seconde connexion sur le même fichier dans un même process).
         {
-            let connection = Connection::open(&db_path).expect("open");
+            let guard = store.raw_connection();
+            let connection = guard.as_ref().expect("connexion partagée");
             connection
                 .execute(
                     "UPDATE day_entries SET start_minutes = 1080, end_minutes = 480
@@ -766,7 +872,7 @@ mod balance_tests {
                     params![week.week_id.as_ref().expect("persisted week").0],
                 )
                 .expect("corrupt");
-        } // connection drop ici, fichier libéré
+        } // guard drop ici, verrou libéré
 
         let balance = store.get_cumulative_balance(&week.week_start);
         assert!(balance.is_err(), "le solde doit échouer proprement, pas mentir, reçu {balance:?}");
@@ -895,16 +1001,17 @@ mod analytics_consistency_tests {
         store.save_week(&week).expect("save");
         let week_id = week.week_id.clone();
 
-        // Corrompre directement le lundi : swap start/end (fin < debut).
+        // Corromper directement le lundi via la connexion partagée : swap start/end (fin < debut).
         {
-            let conn = duckdb::Connection::open(&store.database_path).expect("open");
+            let guard = store.raw_connection();
+            let conn = guard.as_ref().expect("connexion partagée");
             conn.execute(
                 "UPDATE day_entries SET start_minutes = 17*60, end_minutes = 8*60
                  WHERE week_id = ?1 AND day_id = 0",
                 duckdb::params![week_id.expect("persisted week").0],
             )
             .expect("corrupt");
-        } // conn drop -> fichier libere
+        } // guard drop -> verrou libéré
 
         let stats = store.get_day_of_week_stats().expect("stats");
         assert_eq!(stats.len(), 7, "7 groupes");
