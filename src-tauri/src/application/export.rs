@@ -138,10 +138,17 @@ pub fn build_export_sheet(
             week.week_start.0.format("%d/%m/%Y"),
             sunday.format("%d/%m/%Y")
         ),
-        meta: vec![(
-            "Seuil heures supplémentaires".to_string(),
-            minutes_to_label(week.overtime_threshold.0),
-        )],
+        meta: vec![
+            (
+                "Application".to_string(),
+                format!("Timetable Desktop v{}", env!("CARGO_PKG_VERSION")),
+            ),
+            ("Identifiant semaine".to_string(), week.week_id.0.clone()),
+            (
+                "Seuil heures supplémentaires".to_string(),
+                minutes_to_label(week.overtime_threshold.0),
+            ),
+        ],
         header: vec!["Jour", "Activé", "Début", "Fin", "Pause", "Total (min)", "Total"],
         rows,
         footer: vec![
@@ -322,5 +329,12 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let second = sheet_to_xlsx(&sheet(150));
         assert_eq!(first, second, "deux exports a 2s d'intervalle doivent etre byte-identiques");
+    }
+
+    #[test]
+    fn les_meta_incluent_la_version_et_l_identifiant() {
+        let sheet = sheet(150);
+        assert!(sheet.meta.iter().any(|(k, v)| k == "Application" && v.starts_with("Timetable Desktop v")));
+        assert!(sheet.meta.iter().any(|(k, _)| k == "Identifiant semaine"));
     }
 }
