@@ -145,14 +145,14 @@ jobs:
           workspaces: src-tauri
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build Tauri app (universal)
+      - name: Build Tauri app
         run: |
-          pnpm run tauri:build -- --target universal2-apple-darwin
+          pnpm run tauri:build
       - name: Upload DMG
         uses: actions/upload-artifact@v7.0.1
         with:
           name: macos-dmg
-          path: src-tauri/target/universal2-apple-darwin/release/bundle/dmg/*.dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: warn
 
   release:
