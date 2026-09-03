@@ -55,7 +55,8 @@ pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
         });
     }
 
-    if !entry.enabled {
+    // Vacation days and disabled days don't need time validation
+    if !entry.enabled || entry.day_type == DayType::Vacation {
         return Ok(());
     }
 
@@ -85,6 +86,12 @@ pub fn calculate_day_minutes(
     travel_deduction_minutes: TravelDeductionMinutes,
 ) -> Result<u16, ValidationError> {
     validate_day(entry)?;
+
+    // Vacation days don't count toward totals
+    if entry.day_type == DayType::Vacation {
+        return Ok(0);
+    }
+
     if !entry.enabled {
         return Ok(0);
     }
@@ -333,5 +340,50 @@ mod tests {
         let deduction_45 = TravelDeductionMinutes::new(45).unwrap();
         entry.has_return_deduction = true;
         assert_eq!(calculate_day_minutes(&entry, deduction_45).unwrap(), 450); // 540 - 45 - 45 = 450
+    }
+
+    #[test]
+    fn vacation_day_not_counted_in_total() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        entry.day_type = DayType::Vacation;
+
+        let deduction = TravelDeductionMinutes::default();
+        // Vacation day should return 0 regardless of times
+        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 0);
+    }
+
+    #[test]
+    fn vacation_days_excluded_from_week_summary() {
+        let sheet = WeekSheet {
+            week_id: Some(WeekId::new()),
+            week_start: WeekStartDate::today(),
+            entries: vec![
+                build_day(0, 480, 1080, 60), // Work day: 540 min
+                {
+                    let mut day = build_day(1, 480, 1080, 60); // Would be 540 min
+                    day.day_type = DayType::Vacation; // But excluded
+                    day
+                },
+            ],
+            overtime_threshold: OvertimeThresholdMinutes(35 * 60),
+            travel_deduction_minutes: TravelDeductionMinutes::default(),
+            updated_at: String::new(),
+        };
+
+        let summary = summarize_week(&sheet).expect("summary should be valid");
+
+        // Only the first day counts
+        assert_eq!(summary.total_minutes, 540);
+        assert_eq!(summary.worked_days, 1);
+    }
+
+    #[test]
+    fn vacation_day_does_not_require_time_validation() {
+        let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
+        entry.day_type = DayType::Vacation;
+        entry.interval = None; // No time set
+
+        // Should validate successfully without time
+        assert!(validate_day(&entry).is_ok());
     }
 }
