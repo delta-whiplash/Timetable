@@ -1,5 +1,7 @@
 export type ThemePreference = "light" | "dark";
 
+export type DayType = "work" | "vacation" | "disabled";
+
 export interface DayEntryView {
   dayId: number;
   label: string;
@@ -11,6 +13,7 @@ export interface DayEntryView {
   hasReturnDeduction: boolean;
   totalMinutes: number;
   totalLabel: string;
+  dayType: DayType;
 }
 
 export interface WeekSummaryView {
@@ -71,6 +74,7 @@ export interface SaveWeekDayEntryInput {
   breakTime: string;
   hasDepartureDeduction: boolean;
   hasReturnDeduction: boolean;
+  dayType?: DayType;
 }
 
 export interface SaveWeekInput {
