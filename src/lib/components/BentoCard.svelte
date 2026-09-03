@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import type { DayEntryView } from "$lib/types";
+  import type { DayEntryView, DayType } from "$lib/types";
   import { toMinutes, toHHMM } from "$lib/time";
 
   export let entry: DayEntryView;
@@ -19,16 +19,36 @@
 
   function handleEnabledChange(checked: boolean) {
     if (checked && !entry.enabled) {
-      // When enabling, set default values if not already set
       dispatch("change", {
         ...entry,
         enabled: true,
         start: entry.start || defaultStart,
         end: entry.end || defaultEnd,
         breakTime: entry.breakTime || defaultBreak,
+        dayType: "work" as DayType,
       });
     } else {
       updateField("enabled", checked);
+    }
+  }
+
+  function cycleDayType() {
+    const types: DayType[] = ["work", "vacation", "disabled"];
+    const currentIndex = types.indexOf(entry.dayType);
+    const nextIndex = (currentIndex + 1) % types.length;
+    const newType = types[nextIndex];
+
+    if (newType === "disabled") {
+      dispatch("change", { ...entry, enabled: false, dayType: "disabled" });
+    } else {
+      dispatch("change", {
+        ...entry,
+        enabled: true,
+        dayType: newType,
+        start: entry.start || defaultStart,
+        end: entry.end || defaultEnd,
+        breakTime: entry.breakTime || defaultBreak,
+      });
     }
   }
 
@@ -40,11 +60,16 @@
     updateField(field, toHHMM(newMinutes));
   }
 
-  $: isWeekend = entry.dayId >= 6;
+  $: isWeekend = entry.dayId >= 5;
+  $: isVacation = entry.dayType === "vacation";
+  $: isDisabled = !entry.enabled;
 </script>
 
 <article
-  class="bento-card {isWeekend ? 'bento-card--weekend' : ''} {!entry.enabled ? 'bento-card--disabled' : ''}"
+  class="bento-card"
+  class:bento-card--weekend={isWeekend}
+  class:bento-card--disabled={isDisabled}
+  class:bento-card--vacation={isVacation}
   role="region"
   aria-label={entry.label}
 >
@@ -59,6 +84,23 @@
         aria-label="Activer {entry.label}"
       />
       <span class="bento-card-day-label">{entry.label}</span>
+      {#if entry.enabled}
+        <button
+          type="button"
+          class="day-type-btn"
+          class:day-type-btn--vacation={isVacation}
+          disabled={disabled}
+          on:click={cycleDayType}
+          aria-label="Type: {entry.dayType}"
+          title="Cliquez pour changer le type de jour"
+        >
+          {#if isVacation}
+            🏖️
+          {:else}
+            💼
+          {/if}
+        </button>
+      {/if}
     </div>
     <div class="bento-card-total">
       {entry.totalLabel}
@@ -398,5 +440,41 @@
   .bento-card--weekend .stepper-value {
     min-width: 48px;
     font-size: 0.8rem;
+  }
+
+  .day-type-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    margin-left: auto;
+  }
+
+  .day-type-btn:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+    border-color: var(--color-border-strong);
+  }
+
+  .day-type-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .day-type-btn--vacation {
+    background: var(--color-primary-subtle);
+    border-color: var(--color-primary);
+  }
+
+  .bento-card--vacation {
+    opacity: 0.85;
+    background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-primary-subtle) 100%);
+    border-color: var(--color-primary);
   }
 </style>
