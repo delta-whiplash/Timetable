@@ -117,6 +117,55 @@ mod desktop {
         Ok(result)
     }
 
+    #[tauri::command]
+    async fn export_all_weeks(
+        app: tauri::AppHandle,
+        state: tauri::State<'_, SharedState>,
+    ) -> Result<Option<String>, PublicError> {
+        use tauri::async_runtime::spawn_blocking;
+        use tauri_plugin_dialog::DialogExt;
+
+        let exported = state
+            .service
+            .export_all_weeks()
+            .map_err(|error| to_public_error("export_all_weeks", error))?;
+
+        let result = spawn_blocking(move || -> Result<Option<String>, PublicError> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            app.dialog()
+                .file()
+                .set_file_name(&exported.file_name)
+                .add_filter("Classeur Excel", &["xlsx"])
+                .save_file(move |path| {
+                    let _ = tx.send(path);
+                });
+
+            let picked = rx.recv().map_err(|_| PublicError {
+                message: "dialogue d'enregistrement interrompu".to_string(),
+            })?;
+
+            let Some(file_path) = picked else {
+                return Ok(None);
+            };
+
+            let path = file_path.into_path().map_err(|error| PublicError {
+                message: format!("chemin invalide: {error:?}"),
+            })?;
+
+            fs::write(&path, &exported.bytes).map_err(|error| PublicError {
+                message: format!("écriture impossible: {error}"),
+            })?;
+
+            Ok(Some(path.to_string_lossy().into_owned()))
+        })
+        .await
+        .map_err(|error| PublicError {
+            message: format!("tâche d'export interrompue: {error}"),
+        })??;
+
+        Ok(result)
+    }
+
     fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         let app_data_dir = app
             .path()
@@ -164,7 +213,8 @@ mod desktop {
                 save_settings,
                 set_theme,
                 get_analytics,
-                export_week
+                export_week,
+                export_all_weeks
             ])
             .run(tauri::generate_context!())
             .expect("tauri application failed to run");

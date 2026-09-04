@@ -50,3 +50,7 @@ export function getAnalytics(): Promise<AnalyticsDataView> {
 export function exportWeek(weekStart: string): Promise<string | null> {
   return invoke("export_week", { weekStart });
 }
+
+export function exportAllWeeks(): Promise<string | null> {
+  return invoke("export_all_weeks");
+}

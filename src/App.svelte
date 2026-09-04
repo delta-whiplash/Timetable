@@ -60,7 +60,8 @@
         end: entry.end,
         breakTime: entry.breakTime,
         hasDepartureDeduction: entry.hasDepartureDeduction,
-        hasReturnDeduction: entry.hasReturnDeduction
+        hasReturnDeduction: entry.hasReturnDeduction,
+        dayType: entry.dayType
       }))
     };
   }
@@ -204,6 +205,7 @@
                 onSelect={handleOpenFromHistory}
                 onDelete={(weekId: string) => appStore.removeWeek(weekId)}
                 onExport={(weekStart: string) => appStore.triggerExport(weekStart)}
+                onExportAll={() => appStore.triggerExportAll()}
               />
             </div>
 

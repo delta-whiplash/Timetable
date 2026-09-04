@@ -592,6 +592,7 @@ fn duplicate_week_start_fails_at_db_level() {
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
         travel_deduction_minutes: timetable_desktop_lib::domain::types::TravelDeductionMinutes::default(),
+        vacation_day_hours: 468,
         updated_at: String::new(),
     };
     store.save_week(&week).expect("première semaine");
@@ -604,6 +605,7 @@ fn duplicate_week_start_fails_at_db_level() {
         entries: default_entries(&default_settings()),
         overtime_threshold: OvertimeThresholdMinutes(35 * 60),
         travel_deduction_minutes: timetable_desktop_lib::domain::types::TravelDeductionMinutes::default(),
+        vacation_day_hours: 468,
         updated_at: String::new(),
     };
     let result = store.save_week(&doublon);
@@ -671,4 +673,167 @@ fn save_with_stale_week_id_adopts_existing_week() {
     assert_eq!(view.week_id, Some("id-A".to_string()));
     let weeks = store.list_weeks().expect("list");
     assert_eq!(weeks.len(), 1, "une seule semaine, pas de doublon");
+}
+
+/// Régression test : day_type doit être persisté et récupéré correctement.
+/// Avant le fix, le frontend ne passait pas dayType dans buildSaveInput,
+/// ce qui faisait que les changements vacation/congé n'étaient pas persistés.
+#[test]
+fn save_week_persists_day_type_correctly() {
+    let temp_dir = tempdir().expect("temp dir");
+    let store = Arc::new(DuckDb::new(temp_dir.path().join("daytype.duckdb")));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+    let service = ApplicationService::new(store.clone());
+
+    // Créer une semaine avec des jours de différents types
+    let view = service
+        .save_week(SaveWeekInput {
+            week_id: Some("daytype-week".to_string()),
+            week_start: "2030-06-03".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
+            entries: vec![
+                SaveWeekDayEntryInput {
+                    day_type: Some("work".to_string()),
+                    day_id: 0,
+                    label: "Lundi".to_string(),
+                    enabled: true,
+                    start: Some("08:00".to_string()),
+                    end: Some("18:00".to_string()),
+                    break_time: "01:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
+                },
+                SaveWeekDayEntryInput {
+                    day_type: Some("vacation".to_string()),
+                    day_id: 1,
+                    label: "Mardi".to_string(),
+                    enabled: true,
+                    start: Some("09:00".to_string()),
+                    end: Some("17:00".to_string()),
+                    break_time: "01:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
+                },
+                SaveWeekDayEntryInput {
+                    day_type: Some("disabled".to_string()),
+                    day_id: 2,
+                    label: "Mercredi".to_string(),
+                    enabled: false,
+                    start: None,
+                    end: None,
+                    break_time: "00:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
+                },
+            ],
+        })
+        .expect("save week with mixed day types");
+
+    // Vérifier que la vue retournée a les bons types
+    assert_eq!(view.entries.len(), 3);
+    assert_eq!(view.entries[0].day_type, "work");
+    assert_eq!(view.entries[1].day_type, "vacation");
+    assert_eq!(view.entries[2].day_type, "disabled");
+
+    // Recharger la semaine depuis la base et vérifier les types
+    let loaded = service
+        .create_or_switch_week(WeekSelectorInput {
+            week_start: "2030-06-03".to_string(),
+        })
+        .expect("reload week");
+
+    assert_eq!(loaded.entries.len(), 3);
+    assert_eq!(loaded.entries[0].day_type, "work", "Lundi reste work");
+    assert_eq!(loaded.entries[1].day_type, "vacation", "Mardi reste vacation");
+    assert_eq!(loaded.entries[2].day_type, "disabled", "Mercredi reste disabled");
+
+    // Vérifier que les totaux sont calculés correctement
+    // Lundi: 8h-18h avec 1h pause = 9h = 540 min
+    assert_eq!(loaded.entries[0].total_minutes, 540);
+    // Mardi en vacation: 468 min (7.8h = vacation_day_hours par défaut)
+    assert_eq!(loaded.entries[1].total_minutes, 468);
+    // Mercredi désactivé: 0 min
+    assert_eq!(loaded.entries[2].total_minutes, 0);
+}
+
+/// Test de régression : jour férié (public_holiday) doit être traité comme vacation
+/// - Pas de validation d'horaire requise
+/// - Ne compte pas dans les totaux
+/// - Persiste correctement en base
+#[test]
+fn public_holiday_is_treated_like_vacation() {
+    use timetable_desktop_lib::application::dto::SaveWeekDayEntryInput;
+    
+    let temp_dir = tempdir().expect("temp dir");
+    let store = Arc::new(DuckDb::new(temp_dir.path().join("holiday.duckdb")));
+
+    store.migrate().expect("migrate");
+    store.ensure_default_settings().expect("default settings");
+    let service = ApplicationService::new(store.clone());
+
+    // Créer une semaine avec un jour férié (sans horaires obligatoires)
+    let view = service
+        .save_week(SaveWeekInput {
+            week_id: Some("holiday-week".to_string()),
+            week_start: "2030-07-01".to_string(),
+            overtime_threshold_minutes: 35 * 60,
+            travel_deduction_minutes: 30,
+            entries: vec![
+                SaveWeekDayEntryInput {
+                    day_type: Some("public_holiday".to_string()),
+                    day_id: 0,
+                    label: "Lundi".to_string(),
+                    enabled: true,
+                    start: Some("09:00".to_string()),
+                    end: Some("17:00".to_string()),
+                    break_time: "01:00".to_string(),
+                    has_departure_deduction: false,
+                    has_return_deduction: false,
+                },
+            ],
+        })
+        .expect("save week with public holiday");
+
+    // Vérifier que le jour férié a le bon type
+    assert_eq!(view.entries[0].day_type, "public_holiday");
+    
+    // Le jour férié ne compte pas dans les totaux (comme vacation)
+    assert_eq!(view.entries[0].total_minutes, 0);
+
+    // Recharger et vérifier la persistance
+    let loaded = service
+        .create_or_switch_week(WeekSelectorInput {
+            week_start: "2030-07-01".to_string(),
+        })
+        .expect("reload week");
+
+    assert_eq!(loaded.entries[0].day_type, "public_holiday", "Jour férié persiste");
+    assert_eq!(loaded.entries[0].total_minutes, 0, "Jour férié ne compte pas");
+}
+
+/// Test de régression : parsing de minuit (24:00 et 00:00)
+#[test]
+fn midnight_time_parsing_works() {
+    use timetable_desktop_lib::domain::types::TimeOfDay;
+    
+    // 24:00 = minuit (1440 minutes)
+    assert_eq!(TimeOfDay::parse("24:00").unwrap().0, 24 * 60);
+    assert_eq!(TimeOfDay::parse("24h00").unwrap().0, 24 * 60);
+    assert_eq!(TimeOfDay::parse("2400").unwrap().0, 24 * 60);
+    
+    // 00:00 = minuit (0 minutes)
+    assert_eq!(TimeOfDay::parse("00:00").unwrap().0, 0);
+    assert_eq!(TimeOfDay::parse("0:00").unwrap().0, 0);
+    
+    // Vérifier l'affichage
+    assert_eq!(TimeOfDay::parse("24:00").unwrap().to_hhmm(), "24:00");
+    assert_eq!(TimeOfDay(0).to_hhmm(), "00:00");
+    assert_eq!(TimeOfDay(24 * 60).to_hhmm(), "24:00");
+    
+    // Heures invalides
+    assert!(TimeOfDay::parse("25:00").is_err());
+    assert!(TimeOfDay::parse("24:01").is_err());
 }

@@ -111,7 +111,7 @@ pub fn build_export_sheet(
         .entries
         .iter()
         .map(|entry| {
-            let total = calculate_day_minutes(entry, week.travel_deduction_minutes)?;
+            let total = calculate_day_minutes(entry, week.travel_deduction_minutes, week.vacation_day_hours)?;
             Ok(vec![
                 entry.label.0.clone(),
                 if entry.enabled { "Oui" } else { "Non" }.to_string(),
@@ -179,6 +179,90 @@ pub fn build_export_sheet(
     })
 }
 
+/// Construit un classeur XLSX multi-feuilles contenant toutes les semaines.
+/// Chaque semaine a sa propre feuille nommée avec la date de début.
+/// Retourne le classeur sérialisé en bytes.
+pub fn build_all_weeks_xlsx(
+    sheets: Vec<(String, ExportSheet)>,
+) -> Vec<u8> {
+    use rust_xlsxwriter::{Color, Format, Workbook};
+
+    let bold = Format::new().set_bold();
+    let title_format = Format::new().set_bold().set_font_size(14);
+    let header_format = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xDCE6F1));
+
+    let mut workbook = Workbook::new();
+
+    // Propriétés fixes pour l'audit (byte-identical exports)
+    use chrono::TimeZone;
+    let fixed_epoch = chrono::Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap();
+    let properties = rust_xlsxwriter::DocProperties::new()
+        .set_title("Export complet - Timetable Desktop")
+        .set_author("Timetable Desktop")
+        .set_creation_datetime(&fixed_epoch);
+    workbook.set_properties(&properties);
+
+    for (sheet_name, sheet) in sheets {
+        // Tronquer le nom de feuille à 31 caractères (limite Excel)
+        let worksheet_name = if sheet_name.len() > 31 {
+            format!("Sem {}", &sheet_name[..27])
+        } else {
+            sheet_name.clone()
+        };
+
+        let worksheet = workbook.add_worksheet();
+        worksheet.set_name(&worksheet_name).expect("nom de feuille");
+
+        // Titre fusionné sur la largeur du tableau
+        let last_col = (sheet.header.len() as u16).saturating_sub(1);
+        worksheet
+            .merge_range(0, 0, 0, last_col, &sheet.title, &title_format)
+            .expect("titre");
+
+        for (index, (key, value)) in sheet.meta.iter().enumerate() {
+            let row = 1 + index as u32;
+            worksheet.write_with_format(row, 0, key.as_str(), &bold).expect("meta clé");
+            worksheet.write(row, 1, value.as_str()).expect("meta valeur");
+        }
+
+        let header_row = 2 + sheet.meta.len() as u32;
+        for (col, heading) in sheet.header.iter().enumerate() {
+            worksheet
+                .write_with_format(header_row, col as u16, *heading, &header_format)
+                .expect("en-tête");
+        }
+
+        for (row_offset, row) in sheet.rows.iter().enumerate() {
+            for (col, cell) in row.iter().enumerate() {
+                let cell_ref = (header_row + 1 + row_offset as u32, col as u16);
+                if col == MINUTES_COLUMN {
+                    worksheet
+                        .write(cell_ref.0, cell_ref.1, cell.parse::<u32>().unwrap_or(0))
+                        .expect("cellule minutes");
+                } else {
+                    worksheet.write(cell_ref.0, cell_ref.1, cell.as_str()).expect("cellule");
+                }
+            }
+        }
+
+        let footer_start = header_row + 1 + sheet.rows.len() as u32 + 1;
+        for (index, (label, value)) in sheet.footer.iter().enumerate() {
+            let row = footer_start + index as u32;
+            worksheet.write_with_format(row, 0, label.as_str(), &bold).expect("pied libellé");
+            worksheet.write(row, 1, value.as_str()).expect("pied valeur");
+        }
+
+        worksheet.set_column_width(0, 24).expect("largeur colonne");
+        for col in 1..=last_col {
+            worksheet.set_column_width(col, 12).expect("largeur colonne");
+        }
+    }
+
+    workbook.save_to_buffer().expect("classeur xlsx")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +306,7 @@ mod tests {
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
             travel_deduction_minutes: TravelDeductionMinutes::default(),
+            vacation_day_hours: 468,
             updated_at: String::new(),
         }
     }

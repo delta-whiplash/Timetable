@@ -53,7 +53,9 @@ describe("appStore.persistSettings", () => {
       activeWeekId: "w1",
       enableTravelDeduction: true,
       travelDeductionMinutes: 30,
-      travelDeductionLabel: "30 min"
+      travelDeductionLabel: "30 min",
+      vacationDayHours: 468,
+      vacationDayHoursLabel: "7.8h"
     });
   });
 
@@ -93,7 +95,8 @@ describe("appStore.persistSettings", () => {
       defaultBreak: "01:00",
       configuredDays: [],
       enableTravelDeduction: true,
-      travelDeductionMinutes: 30
+      travelDeductionMinutes: 30,
+      vacationDayHours: 468
     });
 
     // Sans le reload, la sidebar garderait 130 % / +10h30 (ancien seuil)

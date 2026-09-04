@@ -55,8 +55,8 @@ pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
         });
     }
 
-    // Vacation days and disabled days don't need time validation
-    if !entry.enabled || entry.day_type == DayType::Vacation {
+    // Vacation, public holidays and disabled days don't need time validation
+    if !entry.enabled || matches!(entry.day_type, DayType::Vacation | DayType::PublicHoliday) {
         return Ok(());
     }
 
@@ -84,11 +84,17 @@ pub fn validate_day(entry: &DayEntry) -> Result<(), ValidationError> {
 pub fn calculate_day_minutes(
     entry: &DayEntry,
     travel_deduction_minutes: TravelDeductionMinutes,
+    vacation_day_hours: u16,
 ) -> Result<u16, ValidationError> {
     validate_day(entry)?;
 
-    // Vacation days don't count toward totals
+    // Vacation days count as configured vacation hours (default 7.8h)
     if entry.day_type == DayType::Vacation {
+        return Ok(vacation_day_hours);
+    }
+
+    // Public holidays don't count toward totals
+    if entry.day_type == DayType::PublicHoliday {
         return Ok(0);
     }
 
@@ -119,7 +125,7 @@ pub fn summarize_week(sheet: &WeekSheet) -> Result<WeekSummary, ValidationError>
     let mut worked_days = 0_u8;
 
     for entry in &sheet.entries {
-        let minutes = calculate_day_minutes(entry, sheet.travel_deduction_minutes)?;
+        let minutes = calculate_day_minutes(entry, sheet.travel_deduction_minutes, sheet.vacation_day_hours)?;
         if minutes > 0 {
             total = total.saturating_add(minutes);
             worked_days = worked_days.saturating_add(1);
@@ -165,6 +171,7 @@ pub fn default_settings() -> super::types::AppSettings {
         active_week_id: None,
         enable_travel_deduction: true,
         travel_deduction_minutes: TravelDeductionMinutes::default(),
+        vacation_day_hours: 468, // 7.8h par défaut (39h / 5 jours)
     }
 }
 
@@ -194,6 +201,7 @@ mod tests {
             active_week_id: None,
             enable_travel_deduction: true,
             travel_deduction_minutes: TravelDeductionMinutes::default(),
+            vacation_day_hours: 468,
         };
 
         let entries = default_entries(&settings);
@@ -233,6 +241,7 @@ mod tests {
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
             travel_deduction_minutes: TravelDeductionMinutes::default(),
+            vacation_day_hours: 468,
             updated_at: String::new(),
         };
 
@@ -268,7 +277,7 @@ mod tests {
         fn total_minutes_never_negative(start in 0u16..1200, duration in 1u16..360, break_minutes in 0u16..120) {
             let end = start.saturating_add(duration).min(1439);
             let entry = build_day(0, start, end.max(start + 1), break_minutes.min(duration.saturating_sub(1)));
-            let total = calculate_day_minutes(&entry, TravelDeductionMinutes::default()).expect("valid day");
+            let total = calculate_day_minutes(&entry, TravelDeductionMinutes::default(), 468).expect("valid day");
             prop_assert!(total <= 1439);
         }
     }
@@ -286,74 +295,81 @@ mod tests {
     fn departure_deduction_reduces_time_by_30min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60); // 08:00-18:00, 60min break
         let deduction = TravelDeductionMinutes::default(); // 30 min
+        let vacation_hours = 468; // 7.8h default
 
         // Sans déduction: 600 - 60 = 540min
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 540);
+        assert_eq!(calculate_day_minutes(&entry, deduction, vacation_hours).unwrap(), 540);
 
         // Avec déduction départ: 540 - 30 = 510min
         entry.has_departure_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 510);
+        assert_eq!(calculate_day_minutes(&entry, deduction, vacation_hours).unwrap(), 510);
     }
 
     #[test]
     fn return_deduction_reduces_time_by_30min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
         let deduction = TravelDeductionMinutes::default(); // 30 min
+        let vacation_hours = 468; // 7.8h default
 
         // Avec déduction retour: 540 - 30 = 510min
         entry.has_return_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 510);
+        assert_eq!(calculate_day_minutes(&entry, deduction, vacation_hours).unwrap(), 510);
     }
 
     #[test]
     fn both_deductions_reduce_time_by_60min() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
         let deduction = TravelDeductionMinutes::default(); // 30 min
+        let vacation_hours = 468; // 7.8h default
 
         // Avec les deux déductions: 540 - 60 = 480min (8h net)
         entry.has_departure_deduction = true;
         entry.has_return_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 480);
+        assert_eq!(calculate_day_minutes(&entry, deduction, vacation_hours).unwrap(), 480);
     }
 
     #[test]
     fn deduction_saturates_at_zero() {
         let mut entry = build_day(0, 8 * 60, 9 * 60, 0); // 08:00-09:00, 0 break = 60min
         let deduction = TravelDeductionMinutes::default(); // 30 min
+        let vacation_hours = 468; // 7.8h default
 
         entry.has_departure_deduction = true;
         entry.has_return_deduction = true;
         // 60 - 30 - 30 = 0 (saturé)
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 0);
+        assert_eq!(calculate_day_minutes(&entry, deduction, vacation_hours).unwrap(), 0);
     }
 
     #[test]
     fn configurable_deduction_amount() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60); // 08:00-18:00, 60min break = 540min net
+        let vacation_hours = 468; // 7.8h default
 
         // Avec 20min de déduction
         let deduction_20 = TravelDeductionMinutes::new(20).unwrap();
         entry.has_departure_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry, deduction_20).unwrap(), 520); // 540 - 20 = 520
+        assert_eq!(calculate_day_minutes(&entry, deduction_20, vacation_hours).unwrap(), 520); // 540 - 20 = 520
 
         // Avec 45min de déduction
         let deduction_45 = TravelDeductionMinutes::new(45).unwrap();
         entry.has_return_deduction = true;
-        assert_eq!(calculate_day_minutes(&entry, deduction_45).unwrap(), 450); // 540 - 45 - 45 = 450
+        assert_eq!(calculate_day_minutes(&entry, deduction_45, vacation_hours).unwrap(), 450); // 540 - 45 - 45 = 450
     }
 
     #[test]
-    fn vacation_day_not_counted_in_total() {
+    fn vacation_day_counts_as_configured_hours() {
         let mut entry = build_day(0, 8 * 60, 18 * 60, 60);
         entry.day_type = DayType::Vacation;
 
         let deduction = TravelDeductionMinutes::default();
-        // Vacation day should return 0 regardless of times
-        assert_eq!(calculate_day_minutes(&entry, deduction).unwrap(), 0);
+        // Vacation day should return configured hours (468 min = 7.8h by default)
+        assert_eq!(calculate_day_minutes(&entry, deduction, 468).unwrap(), 468);
+        // With custom 8h (480 min)
+        assert_eq!(calculate_day_minutes(&entry, deduction, 480).unwrap(), 480);
     }
 
     #[test]
-    fn vacation_days_excluded_from_week_summary() {
+    fn vacation_days_count_in_week_summary() {
         let sheet = WeekSheet {
             week_id: Some(WeekId::new()),
             week_start: WeekStartDate::today(),
@@ -361,20 +377,21 @@ mod tests {
                 build_day(0, 480, 1080, 60), // Work day: 540 min
                 {
                     let mut day = build_day(1, 480, 1080, 60); // Would be 540 min
-                    day.day_type = DayType::Vacation; // But excluded
+                    day.day_type = DayType::Vacation; // But counts as 468 min (7.8h)
                     day
                 },
             ],
             overtime_threshold: OvertimeThresholdMinutes(35 * 60),
             travel_deduction_minutes: TravelDeductionMinutes::default(),
+            vacation_day_hours: 468, // 7.8h default
             updated_at: String::new(),
         };
 
         let summary = summarize_week(&sheet).expect("summary should be valid");
 
-        // Only the first day counts
-        assert_eq!(summary.total_minutes, 540);
-        assert_eq!(summary.worked_days, 1);
+        // Work day (540) + Vacation day (468) = 1008 min
+        assert_eq!(summary.total_minutes, 1008);
+        assert_eq!(summary.worked_days, 2);
     }
 
     #[test]

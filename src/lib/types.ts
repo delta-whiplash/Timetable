@@ -1,6 +1,6 @@
 export type ThemePreference = "light" | "dark";
 
-export type DayType = "work" | "vacation" | "disabled";
+export type DayType = "work" | "vacation" | "public_holiday" | "disabled";
 
 export interface DayEntryView {
   dayId: number;
@@ -59,6 +59,8 @@ export interface SettingsView {
   enableTravelDeduction: boolean;
   travelDeductionMinutes: number;
   travelDeductionLabel: string;
+  vacationDayHours: number;
+  vacationDayHoursLabel: string;
 }
 
 export interface BootstrapState {
@@ -101,6 +103,7 @@ export interface SaveSettingsInput {
   configuredDays: ConfiguredDayView[];
   enableTravelDeduction: boolean;
   travelDeductionMinutes: number;
+  vacationDayHours: number;
 }
 
 export interface CommandError {

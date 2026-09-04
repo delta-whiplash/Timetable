@@ -97,22 +97,37 @@ impl TimeOfDay {
             return Err(ValidationError::InvalidTimeFormat);
         };
 
-        if hours > 23 || minutes > 59 {
+        if hours > 24 || minutes > 59 {
             return Err(ValidationError::InvalidTimeFormat);
         }
+        
+        // 24:00 = minuit du lendemain, équivalent à 1440 minutes
+        if hours == 24 && minutes == 0 {
+            return Ok(Self(24 * 60));
+        }
+        
+        if hours == 24 {
+            return Err(ValidationError::InvalidTimeFormat);
+        }
+        
         Ok(Self(hours * 60 + minutes))
     }
 
     pub fn to_hhmm(self) -> String {
+        // 1440 minutes = 24:00 (minuit)
+        if self.0 == 24 * 60 {
+            return "24:00".to_string();
+        }
         format!("{:02}:{:02}", self.0 / 60, self.0 % 60)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DayType {
     Work,
     Vacation,
+    PublicHoliday,
     Disabled,
 }
 
@@ -205,6 +220,8 @@ pub struct WeekSheet {
     pub overtime_threshold: OvertimeThresholdMinutes,
     /// Snapshot de la déduction trajet au moment de la création de la semaine
     pub travel_deduction_minutes: TravelDeductionMinutes,
+    /// Heures théoriques pour un jour de congé (snapshot au moment de la création)
+    pub vacation_day_hours: u16,
     pub updated_at: String,
 }
 
@@ -254,6 +271,8 @@ pub struct AppSettings {
     pub enable_travel_deduction: bool,
     /// Durée de déduction par case cochée (snapshot au moment de la création de semaine)
     pub travel_deduction_minutes: TravelDeductionMinutes,
+    /// Heures théoriques pour un jour de congé (défaut: 7.8h = 468 min pour 39h/semaine)
+    pub vacation_day_hours: u16,
 }
 
 pub fn default_configured_days() -> Vec<ConfiguredDay> {
@@ -311,6 +330,22 @@ mod tests {
     fn day_type_serializes_to_lowercase() {
         assert_eq!(serde_json::to_string(&DayType::Work).unwrap(), "\"work\"");
         assert_eq!(serde_json::to_string(&DayType::Vacation).unwrap(), "\"vacation\"");
+        assert_eq!(serde_json::to_string(&DayType::PublicHoliday).unwrap(), "\"public_holiday\"");
         assert_eq!(serde_json::to_string(&DayType::Disabled).unwrap(), "\"disabled\"");
+    }
+    
+    #[test]
+    fn test_midnight_parsing() {
+        // 24:00 = minuit (1440 minutes)
+        assert_eq!(TimeOfDay::parse("24:00").unwrap().0, 24 * 60);
+        assert_eq!(TimeOfDay::parse("24h00").unwrap().0, 24 * 60);
+        
+        // 00:00 = minuit (0 minutes)
+        assert_eq!(TimeOfDay::parse("00:00").unwrap().0, 0);
+        assert_eq!(TimeOfDay::parse("0:00").unwrap().0, 0);
+        
+        // Vérifier l'affichage
+        assert_eq!(TimeOfDay::parse("24:00").unwrap().to_hhmm(), "24:00");
+        assert_eq!(TimeOfDay(0).to_hhmm(), "00:00");
     }
 }

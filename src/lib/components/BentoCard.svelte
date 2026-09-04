@@ -33,7 +33,7 @@
   }
 
   function cycleDayType() {
-    const types: DayType[] = ["work", "vacation", "disabled"];
+    const types: DayType[] = ["work", "vacation", "public_holiday", "disabled"];
     const currentIndex = types.indexOf(entry.dayType);
     const nextIndex = (currentIndex + 1) % types.length;
     const newType = types[nextIndex];
@@ -62,6 +62,7 @@
 
   $: isWeekend = entry.dayId >= 5;
   $: isVacation = entry.dayType === "vacation";
+  $: isPublicHoliday = entry.dayType === "public_holiday";
   $: isDisabled = !entry.enabled;
 </script>
 
@@ -70,6 +71,7 @@
   class:bento-card--weekend={isWeekend}
   class:bento-card--disabled={isDisabled}
   class:bento-card--vacation={isVacation}
+  class:bento-card--public-holiday={isPublicHoliday}
   role="region"
   aria-label={entry.label}
 >
@@ -89,6 +91,7 @@
           type="button"
           class="day-type-btn"
           class:day-type-btn--vacation={isVacation}
+          class:day-type-btn--public-holiday={isPublicHoliday}
           disabled={disabled}
           on:click={cycleDayType}
           aria-label="Type: {entry.dayType}"
@@ -96,6 +99,8 @@
         >
           {#if isVacation}
             🏖️
+          {:else if isPublicHoliday}
+            🎉
           {:else}
             💼
           {/if}
@@ -472,9 +477,20 @@
     border-color: var(--color-primary);
   }
 
+  .day-type-btn--public-holiday {
+    background: var(--color-success-subtle, #d4edda);
+    border-color: var(--color-success, #28a745);
+  }
+
   .bento-card--vacation {
     opacity: 0.85;
     background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-primary-subtle) 100%);
     border-color: var(--color-primary);
+  }
+
+  .bento-card--public-holiday {
+    opacity: 0.85;
+    background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-success-subtle, #d4edda) 100%);
+    border-color: var(--color-success, #28a745);
   }
 </style>

@@ -8,6 +8,7 @@
   export let onSelect: (weekStart: string) => void;
   export let onDelete: (weekId: string) => void;
   export let onExport: (weekStart: string) => void;
+  export let onExportAll: () => void;
 
   let showDeleteModal = false;
   let weekToDelete: { id: string; start: string } | null = null;
@@ -37,6 +38,11 @@
       <p class="eyebrow">Historique</p>
       <h2>Semaines enregistrées</h2>
     </div>
+    {#if items.length > 0}
+      <button class="button button--primary" type="button" on:click={onExportAll}>
+        Tout exporter
+      </button>
+    {/if}
   </div>
 
   {#if loading}
@@ -101,6 +107,9 @@ Cette action est irréversible.`
     border-bottom: 1px solid var(--color-border);
     background: var(--color-surface);
     flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 
   .panel-heading .eyebrow {
@@ -216,5 +225,16 @@ Cette action est irréversible.`
   .button--danger:hover {
     background: var(--color-danger-hover);
     border-color: var(--color-danger-hover);
+  }
+
+  .button--primary {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+  }
+
+  .button--primary:hover {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
   }
 </style>

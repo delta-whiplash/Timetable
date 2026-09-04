@@ -125,6 +125,8 @@ pub struct SettingsView {
     pub enable_travel_deduction: bool,
     pub travel_deduction_minutes: u16,
     pub travel_deduction_label: String,
+    pub vacation_day_hours: u16,
+    pub vacation_day_hours_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +214,8 @@ pub fn settings_to_view(settings: &AppSettings) -> SettingsView {
         enable_travel_deduction: settings.enable_travel_deduction,
         travel_deduction_minutes: settings.travel_deduction_minutes.0,
         travel_deduction_label: format!("{} min", settings.travel_deduction_minutes.0),
+        vacation_day_hours: settings.vacation_day_hours,
+        vacation_day_hours_label: format!("{:.1}h", settings.vacation_day_hours as f64 / 60.0),
     }
 }
 
@@ -232,7 +236,7 @@ pub fn week_to_view(
         .entries
         .iter()
         .map(|entry| {
-            let total_minutes = calculate_day_minutes(entry, week.travel_deduction_minutes)?;
+            let total_minutes = calculate_day_minutes(entry, week.travel_deduction_minutes, week.vacation_day_hours)?;
             Ok(DayEntryView {
                 day_id: entry.day_id.0,
                 label: entry.label.0.clone(),
@@ -247,6 +251,7 @@ pub fn week_to_view(
                 day_type: match entry.day_type {
                     DayType::Work => "work".to_string(),
                     DayType::Vacation => "vacation".to_string(),
+                    DayType::PublicHoliday => "public_holiday".to_string(),
                     DayType::Disabled => "disabled".to_string(),
                 },
             })
@@ -268,4 +273,88 @@ pub fn week_to_view(
                 .unwrap_or_else(|| "--".to_string()),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test de non-régression : day_type doit être correctement désérialisé
+    /// Issue : le frontend ne passait pas dayType dans buildSaveInput, ce qui
+    /// faisait que les changements vacation/congé n'étaient pas persistés.
+    #[test]
+    fn save_week_day_entry_input_deserializes_day_type() {
+        let json = r#"{
+            "dayId": 0,
+            "label": "Lundi",
+            "enabled": true,
+            "start": "09:00",
+            "end": "17:00",
+            "breakTime": "01:00",
+            "hasDepartureDeduction": false,
+            "hasReturnDeduction": false,
+            "dayType": "vacation"
+        }"#;
+
+        let input: SaveWeekDayEntryInput = serde_json::from_str(json).expect("should parse");
+        assert_eq!(input.day_type, Some("vacation".to_string()));
+    }
+
+    #[test]
+    fn save_week_day_entry_input_handles_missing_day_type() {
+        // Pour la rétro-compatibilité, day_type peut être absent
+        let json = r#"{
+            "dayId": 0,
+            "label": "Lundi",
+            "enabled": true,
+            "start": "09:00",
+            "end": "17:00",
+            "breakTime": "01:00",
+            "hasDepartureDeduction": false,
+            "hasReturnDeduction": false
+        }"#;
+
+        let input: SaveWeekDayEntryInput = serde_json::from_str(json).expect("should parse");
+        assert_eq!(input.day_type, None);
+    }
+
+    #[test]
+    fn save_week_input_includes_day_type_in_entries() {
+        // Vérifie que le JSON complet avec dayType pour chaque entrée est valide
+        let json = r#"{
+            "weekId": "test-week",
+            "weekStart": "2026-01-05",
+            "overtimeThresholdMinutes": 2100,
+            "travelDeductionMinutes": 30,
+            "entries": [
+                {
+                    "dayId": 0,
+                    "label": "Lundi",
+                    "enabled": true,
+                    "start": "09:00",
+                    "end": "17:00",
+                    "breakTime": "01:00",
+                    "hasDepartureDeduction": false,
+                    "hasReturnDeduction": false,
+                    "dayType": "vacation"
+                },
+                {
+                    "dayId": 1,
+                    "label": "Mardi",
+                    "enabled": true,
+                    "start": "08:00",
+                    "end": "18:00",
+                    "breakTime": "01:00",
+                    "hasDepartureDeduction": true,
+                    "hasReturnDeduction": true,
+                    "dayType": "work"
+                }
+            ]
+        }"#;
+
+        let input: SaveWeekInput = serde_json::from_str(json).expect("should parse");
+        assert_eq!(input.entries.len(), 2);
+        assert_eq!(input.entries[0].day_type, Some("vacation".to_string()));
+        assert_eq!(input.entries[1].day_type, Some("work".to_string()));
+    }
 }

@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use chrono::Local;
 use tracing::info;
 
 use crate::{
     application::{
         dto::{
             settings_to_view, week_to_view, AnalyticsDataView, BootstrapState, DeleteWeekInput,
-            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekAnalyticsPoint, WeekListItem,
+            SaveSettingsInput, SaveWeekDayEntryInput, SaveWeekInput, SettingsView, WeekListItem,
             WeekSelectorInput, WeekSheetView,
         },
         export::{build_export_sheet, sheet_to_xlsx},
@@ -220,6 +221,32 @@ impl ApplicationService {
         })
     }
 
+    /// Exporte toutes les semaines enregistrées dans un seul fichier Excel multi-feuilles.
+    /// Chaque semaine a sa propre feuille nommée avec sa date de début.
+    pub fn export_all_weeks(&self) -> Result<ExportedFile, ApplicationError> {
+        let weeks = self.store.list_weeks()?;
+        
+        if weeks.is_empty() {
+            return Err(ApplicationError::Storage(StorageError::EntityNotFound));
+        }
+
+        let mut sheets: Vec<(String, crate::application::export::ExportSheet)> = Vec::new();
+
+        for week in weeks {
+            let balance = self.store.get_cumulative_balance(&week.week_start)?;
+            let sheet = build_export_sheet(&week, balance).map_err(ApplicationError::from)?;
+            let sheet_name = week.week_start.as_string();
+            sheets.push((sheet_name, sheet));
+        }
+
+        let bytes = crate::application::export::build_all_weeks_xlsx(sheets);
+
+        Ok(ExportedFile {
+            file_name: format!("timetable-export-complet-{}.xlsx", Local::now().format("%Y%m%d")),
+            bytes,
+        })
+    }
+
     fn resolve_active_week(&self, settings: &AppSettings) -> Result<WeekSheetView, ApplicationError> {
         if let Some(active_week_id) = &settings.active_week_id {
             if let Ok(Some(week)) = self.store.get_week_by_id(active_week_id) {
@@ -256,6 +283,7 @@ impl ApplicationService {
             entries: default_entries(settings),
             overtime_threshold: settings.overtime_threshold,
             travel_deduction_minutes: settings.travel_deduction_minutes,
+            vacation_day_hours: settings.vacation_day_hours,
             updated_at: String::new(),
         };
 
@@ -267,6 +295,8 @@ impl ApplicationService {
     fn parse_week_input(&self, input: SaveWeekInput) -> Result<WeekSheet, ApplicationError> {
         let overtime_threshold = OvertimeThresholdMinutes::new(input.overtime_threshold_minutes)?;
         let travel_deduction_minutes = TravelDeductionMinutes::new(input.travel_deduction_minutes)?;
+        // Récupérer les settings pour avoir vacation_day_hours
+        let settings = self.get_settings()?;
         let entries = input
             .entries
             .into_iter()
@@ -279,6 +309,7 @@ impl ApplicationService {
             entries,
             overtime_threshold,
             travel_deduction_minutes,
+            vacation_day_hours: settings.vacation_day_hours,
             updated_at: String::new(),
         })
     }
@@ -295,6 +326,7 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
         .map(|s| match s {
             "work" => Ok(DayType::Work),
             "vacation" => Ok(DayType::Vacation),
+            "public_holiday" => Ok(DayType::PublicHoliday),
             "disabled" => Ok(DayType::Disabled),
             _ => Err(ValidationError::InvalidDayType { value: s.to_string() }),
         })
@@ -305,7 +337,7 @@ fn parse_day_entry_input(input: SaveWeekDayEntryInput) -> Result<DayEntry, Valid
             DayType::Disabled
         });
 
-    let interval = if input.enabled && day_type == DayType::Work {
+    let interval = if input.enabled && (day_type == DayType::Work || day_type == DayType::PublicHoliday) {
         let start = input
             .start
             .as_deref()

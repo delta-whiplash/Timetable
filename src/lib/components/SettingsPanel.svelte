@@ -16,6 +16,8 @@
   // Travel deduction settings
   let enableTravelDeduction = settings.enableTravelDeduction;
   let travelDeductionMinutes = settings.travelDeductionMinutes;
+  // Vacation day hours setting
+  let vacationDayHours = settings.vacationDayHours;
 
   // Format minutes to human-readable "Xh Ymin"
   function formatMinutesToHuman(minutes: number): string {
@@ -23,6 +25,12 @@
       return `${minutes} min`;
     }
     return `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
+  }
+
+  // Format vacation hours (in minutes) to "X.Yh" format
+  function formatVacationHours(minutes: number): string {
+    const hours = minutes / 60;
+    return `${hours.toFixed(1)}h`;
   }
 
   function updateDay(index: number, next: ConfiguredDayView) {
@@ -39,6 +47,7 @@
       configuredDays: settings.configuredDays,
       enableTravelDeduction,
       travelDeductionMinutes,
+      vacationDayHours,
     });
   }
 
@@ -60,6 +69,10 @@
 
   function adjustTravelDeduction(amount: number) {
     travelDeductionMinutes = Math.max(15, Math.min(180, travelDeductionMinutes + amount));
+  }
+
+  function adjustVacationDayHours(amount: number) {
+    vacationDayHours = Math.max(60, Math.min(720, vacationDayHours + amount));
   }
 </script>
 
@@ -136,6 +149,17 @@
           </div>
         {/if}
       </div>
+    </div>
+
+    <!-- Heures de congé par jour -->
+    <div class="field field--stepper">
+      <span>Heures de congé / jour</span>
+      <div class="stepper">
+        <button class="stepper-btn" type="button" on:click={() => adjustVacationDayHours(-30)} aria-label="Diminuer de 30 minutes">−</button>
+        <span class="stepper-value">{formatVacationHours(vacationDayHours)}</span>
+        <button class="stepper-btn" type="button" on:click={() => adjustVacationDayHours(30)} aria-label="Augmenter de 30 minutes">+</button>
+      </div>
+      <p class="field-hint">Heures comptabilisées par jour de congé pour l'objectif hebdomadaire</p>
     </div>
 
     <fieldset class="theme-switcher">
@@ -405,5 +429,12 @@
 
   .travel-deduction-stepper {
     margin-top: 0.25rem;
+  }
+
+  .field-hint {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin: 0;
+    text-align: center;
   }
 </style>
